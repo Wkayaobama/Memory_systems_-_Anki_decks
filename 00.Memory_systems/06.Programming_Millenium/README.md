@@ -50,6 +50,26 @@ Recall routes it trains, both directions:
 - anchor scene bridges the two — and you can **fuse it with your existing French Millenium peg**
   for the same number (e.g. 042 *raie/…* + the do-while soup-tasting scene) to bind address ↔ concept.
 
+## The procedural layer: notebooks
+
+Imagery and definitions are declarative memory; **seeing the net effect of code you run is
+procedural memory** — the same reason this repo is built out of `.ipynb` notebooks. One
+notebook per hundred-block (same chunking as `export_for_anki/`), and from each category
+exactly ONE carefully chosen **engraver concept** — the demo whose input→output burns in the
+*larger* idea, not the particulars (`037 Nesting depth` teaches all of branching;
+`716 EXPLAIN before/after an index` teaches all of query performance):
+
+```
+notebooks/000_fundamentals.ipynb … 900_quality_ops.ipynb   (10 × 10 demos, executed outputs committed)
+```
+
+Method per cell: read the code → **predict the output** → run → compare. Cells marked
+`# INTENDED ERROR — read the traceback` raise on purpose: the traceback IS the lesson
+(off-by-one `IndexError`, duplicate-key `IntegrityError`, port-in-use `OSError`…).
+The pipeline is raw JSON → execute → output: `notebooks/specs/*.json` hold the cells,
+`notebooks/make_notebooks.py` assembles them with nbformat and executes them with nbclient,
+committing notebooks *with* their outputs so review works without running anything.
+
 ## Files
 
 - `programming_millenium.csv` — source of truth, one row per code (edit here)
@@ -57,6 +77,8 @@ Recall routes it trains, both directions:
 - `export_for_anki/000.csv … 900.csv` — semicolon-separated per-hundred blocks, same shape as
   the original export (`code;concept;anchor;definition;example;confusables`)
 - `build.py` — regenerates the xlsx + exports from the CSV (`pip install openpyxl`)
+- `notebooks/` — the procedural layer: specs + builder + 10 executed notebooks
+  (`pip install nbformat nbclient ipykernel` to rebuild)
 
 Content was drafted by one authoring pass per domain, then de-duplicated ("one concept, one
 home") and cross-referenced. Expect to tweak entries as you learn — that's the point of the
