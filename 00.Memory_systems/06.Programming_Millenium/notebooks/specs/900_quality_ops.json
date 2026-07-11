@@ -1,0 +1,97 @@
+{
+  "notebook": "900_quality_ops",
+  "cells": [
+    {
+      "type": "md",
+      "source": "# 900 · Quality, security & operations — procedural layer\n\n**Domain mnemonic — five NINES:** 99.999% — the digit of never failing.\n\nCodes covered: **903** arrange-act-assert · **916** property-based testing · **924** git bisect · **933** merge · **946** feature flags · **951** SQL injection · **964** password hashing · **976** percentiles vs averages · **983** batching round trips · **991** structured logging.\n\n**Method:** read the cell → **predict the output** → run it → compare. The matrix holds the imagery; this notebook engraves the net effect. Cells run top to bottom in one kernel. No cell raises: the one deliberately failing test is caught and *reported* by the unittest runner — that report is the output to study."
+    },
+    {
+      "type": "md",
+      "source": "## 903 · Arrange-Act-Assert\n\nThree-part test structure: set up the starting state, invoke the one behavior under test, then verify the outcome.\n\n*A three-act play: stagehands ARRANGE the props, the ACTor performs exactly one scene, then a critic stands up and ASSERTs the verdict.*\n\nWatch: two tests, three beats each. One passes (`ok`), one fails on a deliberately wrong expectation — the runner reports `F` and points its traceback at the assert line. Predict which test fails and what the final tally says."
+    },
+    {
+      "type": "code",
+      "source": "import unittest\n\ndef add(a, b):\n    return a + b\n\nclass TestAdd(unittest.TestCase):\n    def test_add_two_positives(self):\n        a, b = 2, 3            # Arrange: set up the starting state\n        result = add(a, b)     # Act: invoke the one behavior under test\n        self.assertEqual(result, 5)   # Assert: verify the outcome\n\n    def test_add_deliberately_wrong_expectation(self):\n        a, b = 2, 2                    # Arrange\n        result = add(a, b)             # Act\n        self.assertEqual(result, 5)    # Assert: wrong on purpose -> runner reports F\n\nunittest.main(argv=[\"nb\"], exit=False, verbosity=2)\nprint(\"^ one F above is expected: the runner CAUGHT the failed assert and reported it.\")\nprint(\"  Each test reads as three beats: arrange, act, assert.\")"
+    },
+    {
+      "type": "md",
+      "source": "## 916 · Property-based testing\n\nGenerate hundreds of random inputs and check an invariant holds for all, shrinking any failure to a minimal counterexample.\n\n*Instead of tasting three cookies, a factory robot bakes 10,000 random cookies and checks one law: none may leave the oven raw. It hands you the SMALLEST raw cookie it found.*\n\nWatch: first a true invariant survives 200 random lists; then a buggy `my_abs` meets the abs-laws and a counterexample you would never hand-pick falls out. Predict which input breaks it."
+    },
+    {
+      "type": "code",
+      "source": "import random\n\nrandom.seed(42)\n\ntrials = 200\nfailures = []\nfor _ in range(trials):\n    xs = [random.randint(-100, 100) for _ in range(random.randint(0, 15))]\n    if list(reversed(list(reversed(xs)))) != xs:\n        failures.append(xs)\n\nprint(f\"property  rev(rev(xs)) == xs  checked on {trials} random lists\")\nprint(f\"failures: {len(failures)}  -> the invariant HELD for every input\")"
+    },
+    {
+      "type": "code",
+      "source": "random.seed(42)\n\ndef my_abs(x):\n    if x > 0:\n        return x\n    if x < 0:\n        return -x\n    return -1          # bug: 'zero has no sign' -- wrong\n\ncounterexample = None\nfor i in range(200):\n    x = random.randint(-5, 5)\n    ok = my_abs(x) >= 0 and my_abs(x) in (x, -x)\n    if not ok:\n        counterexample = x\n        break\n\nif counterexample is None:\n    print(\"property held on 200 random ints (it should NOT have -- widen the generator)\")\nelse:\n    print(\"property  my_abs(x) >= 0 and my_abs(x) in (x, -x)\")\n    print(f\"FALSIFIED after {i + 1} random inputs\")\n    print(f\"counterexample: x = {counterexample}  ->  my_abs({counterexample}) = {my_abs(counterexample)}\")\n    print(\"three hand-picked examples would likely have missed this; 200 random ones did not\")"
+    },
+    {
+      "type": "md",
+      "source": "## 924 · Git bisect\n\nBinary-search history (or a failing input): test the midpoint, discard the good half, converge on the culprit in log2(n) steps.\n\n*A librarian hunts the page where a novel turns bad: open at the middle, ask 'good or bad?', discard half. A thousand commits interrogated in ten questions.*\n\nWatch: 32 simulated versions, bug hidden somewhere. Predict the probe sequence (16, then?) and how many questions it takes before you run."
+    },
+    {
+      "type": "code",
+      "source": "BUG_INTRODUCED_AT = 21          # hidden truth the search must discover\n\ndef is_bad(version):\n    return version >= BUG_INTRODUCED_AT\n\nlo, hi = 1, 32                  # version 1 known good, version 32 known bad\nprint(f\"searching versions {lo}..{hi}  (good..bad)\\n\")\nsteps = 0\nwhile hi - lo > 1:\n    mid = (lo + hi) // 2\n    steps += 1\n    verdict = \"BAD \" if is_bad(mid) else \"good\"\n    print(f\"step {steps}: probe v{mid:<2}  -> {verdict}   (window was lo=v{lo}, hi=v{hi})\")\n    if is_bad(mid):\n        hi = mid\n    else:\n        lo = mid\n\nprint(f\"\\nfirst bad version: v{hi}  found in {steps} probes (log2(32) = 5)\")\nprint(\"git bisect automates exactly this: bad HEAD, good v2.1, then answer good/bad per checkout\")"
+    },
+    {
+      "type": "md",
+      "source": "## 933 · Merge\n\nCombines two branch histories with a merge commit that has both parents, preserving each branch's true history.\n\n*Two rivers meet and flow on as one; standing at the confluence — the merge commit — you can still see both original riverbeds stretching behind you.*\n\nWatch: this is REAL git in a throwaway temp directory (the enclosing repo is never touched). Predict the shape of `git log --graph` before and after the merge — and how many parents commit M has."
+    },
+    {
+      "type": "code",
+      "source": "import subprocess, tempfile, os\n\ntmp = tempfile.mkdtemp(prefix=\"merge_demo_\")     # isolated repo -- never touches this project\n\ndef git(*args):\n    r = subprocess.run([\"git\", *args], cwd=tmp, capture_output=True, text=True)\n    return r.stdout.strip()\n\ngit(\"-c\", \"init.defaultBranch=main\", \"init\", \"-q\")\ngit(\"config\", \"user.name\", \"Demo\")\ngit(\"config\", \"user.email\", \"demo@example.com\")\n\ndef commit(fname, msg):\n    with open(os.path.join(tmp, fname), \"w\") as f:\n        f.write(msg + \"\\n\")\n    git(\"add\", fname)\n    git(\"commit\", \"-q\", \"-m\", msg)\n\ncommit(\"base.txt\", \"A: base commit on main\")\ngit(\"switch\", \"-q\", \"-c\", \"feature\")\ncommit(\"feature.txt\", \"B: work on feature branch\")\ngit(\"switch\", \"-q\", \"main\")\ncommit(\"main.txt\", \"C: parallel work on main\")\n\nprint(\"two branches have diverged from A:\")\nprint(git(\"log\", \"--graph\", \"--oneline\", \"--all\"))"
+    },
+    {
+      "type": "code",
+      "source": "git(\"merge\", \"feature\", \"-q\", \"-m\", \"M: merge feature into main\")\n\nprint(\"after `git merge feature` -- the merge commit M joins both lines:\")\nprint(git(\"log\", \"--graph\", \"--oneline\", \"--all\"))\nprint()\nprint(\"parents of the merge commit:\", git(\"log\", \"-1\", \"--format=%p\"))\nprint(\"both riverbeds are still visible behind the confluence.\")\nprint(\"`git rebase main` (on feature) would instead REWRITE B onto C: one straight line, no M.\")"
+    },
+    {
+      "type": "md",
+      "source": "## 946 · Feature flags\n\nRuntime switches that decouple deploy from release: ship code dark, enable per user or percentage, kill instantly on trouble.\n\n*The new chandelier is fully wired into the ballroom but its wall switch stays OFF; you flip it for the staff first, then table by table — and flip it back the instant sparks fly.*\n\nWatch: one function, three calls, three different behaviors — and not a single line of `checkout` changes between them. Predict all three lines."
+    },
+    {
+      "type": "code",
+      "source": "FLAGS = {\"new_checkout\": False}       # runtime switch, no redeploy needed\n\ndef checkout(user, total):\n    if FLAGS[\"new_checkout\"]:\n        return f\"NEW path: {user} pays {total * 0.9:.2f} (loyalty discount, one-page flow)\"\n    return f\"old path: {user} pays {total:.2f} (classic three-page flow)\"\n\nprint(\"deployed code contains BOTH paths. Same build, three moments in time:\")\nprint()\nprint(\"flag off (dark launch):\", checkout(\"ada\", 100.0))\n\nFLAGS[\"new_checkout\"] = True          # release: flip the switch, ship nothing\nprint(\"flag on  (released)  :\", checkout(\"ada\", 100.0))\n\nFLAGS[\"new_checkout\"] = False         # trouble at 2 AM? flip it back\nprint(\"flag off (rollback)  :\", checkout(\"ada\", 100.0))\nprint()\nprint(\"deploy put the code on the server; the FLAG released it -- and un-released it instantly.\")"
+    },
+    {
+      "type": "md",
+      "source": "## 951 · SQL injection\n\nAttacker-controlled text concatenated into SQL executes as SQL, reading or destroying data — e.g. input like `' OR 1=1--`.\n\n*A visitor signs the guestbook: `Bob'); DROP TABLE guests;--` and the naive clerk reads the name aloud as a command — the entire guest list vanishes. Data spoken as code.*\n\nWatch (defensive education): the same hostile \"password\" goes through two query-building styles. Predict how many rows each returns — then read the concatenated query string carefully to see why."
+    },
+    {
+      "type": "code",
+      "source": "import sqlite3\n\nconn = sqlite3.connect(\":memory:\")\nconn.execute(\"CREATE TABLE users (id INTEGER, name TEXT, password TEXT)\")\nconn.executemany(\"INSERT INTO users VALUES (?, ?, ?)\",\n                 [(1, \"ada\", \"s3cret\"), (2, \"grace\", \"hopper!\"), (3, \"alan\", \"enigma\")])\n\nattacker_input = \"' OR '1'='1\"\n\nquery = f\"SELECT id, name FROM users WHERE name = 'ada' AND password = '{attacker_input}'\"\nprint(\"THE ATTACK -- query built by string concatenation:\")\nprint(\" \", query)\nrows = conn.execute(query).fetchall()\nprint(\"  rows returned:\", rows, \" <- logged in as EVERYONE, no password known\")\nprint()\nprint(\"THE FIX -- parameterized query, same hostile input:\")\nrows = conn.execute(\"SELECT id, name FROM users WHERE name = ? AND password = ?\",\n                    (\"ada\", attacker_input)).fetchall()\nprint(\"  rows returned:\", rows, \" <- the input stayed DATA, never became SQL\")\nprint()\nprint(\"Never build SQL from strings. Placeholders, always.\")"
+    },
+    {
+      "type": "md",
+      "source": "## 964 · Password hashing\n\nStore only slow, salted, one-way hashes (bcrypt, argon2) so stolen databases cannot be reversed and rainbow tables are useless.\n\n*Each password goes through a deliberately SLOW one-way meat grinder with a pinch of unique salt, so two identical steaks grind into different mince — and nothing can be un-ground.*\n\nWatch: the hash prefixes change on every run — salts are **supposed** to be random; that is the one intentional nondeterminism in this notebook. The verdicts (`identical? False`, `True`/`False` on verify) never change. Never store plaintext."
+    },
+    {
+      "type": "code",
+      "source": "import hashlib, os\n\ndef hash_pw(password, salt, iterations=100_000):\n    return hashlib.pbkdf2_hmac(\"sha256\", password.encode(), salt, iterations)\n\npwd = \"correct horse battery staple\"\nsalt1 = os.urandom(16)     # salts SHOULD be random -- that is the point of a salt\nsalt2 = os.urandom(16)\nh1 = hash_pw(pwd, salt1)\nh2 = hash_pw(pwd, salt2)\n\nprint(\"same password, two different random salts:\")\nprint(\"  salt1 -> hash\", h1.hex()[:16] + \"...\")\nprint(\"  salt2 -> hash\", h2.hex()[:16] + \"...\")\nprint(\"  hashes identical?\", h1 == h2, \" -> rainbow tables are useless\")\nprint()\n\ndef verify(password, salt, stored_hash):\n    return hash_pw(password, salt) == stored_hash    # re-hash and compare; never un-hash\n\nprint(\"verify(correct password):\", verify(pwd, salt1, h1))\nprint(\"verify(wrong password)  :\", verify(\"hunter2\", salt1, h1))\nprint()\nprint(\"store (salt, hash) only -- 100,000 iterations make each guess deliberately slow\")"
+    },
+    {
+      "type": "md",
+      "source": "## 976 · Percentiles vs averages\n\nReport p50/p95/p99 latency rather than the mean: averages hide the slow tail that real users actually experience.\n\n*'This river averages one meter deep,' says the sign — straight over a nine-meter trench that soaks every tenth crosser. p50 is the median crosser; p99 nearly drowned.*\n\nWatch: 95 requests near 10 ms plus 5 at 500 ms. Predict the mean by hand first — (95×10 + 5×500)/100 — then see which of the four numbers describes a user you have actually met."
+    },
+    {
+      "type": "code",
+      "source": "import random, statistics\n\nrandom.seed(7)\nlatencies = [random.gauss(10, 1) for _ in range(95)] + [500.0] * 5   # 95 fast, 5 terrible\nrandom.shuffle(latencies)\n\nq = statistics.quantiles(latencies, n=100)     # 99 cut points\nmean   = statistics.mean(latencies)\nmedian = statistics.median(latencies)\np95, p99 = q[94], q[98]\n\nprint(\"100 requests: 95 around 10 ms, 5 at 500 ms\")\nprint()\nprint(f\"  mean   : {mean:7.1f} ms   <- 'looks fine', says nobody's actual experience\")\nprint(f\"  median : {median:7.1f} ms   (p50: the typical user)\")\nprint(f\"  p95    : {p95:7.1f} ms\")\nprint(f\"  p99    : {p99:7.1f} ms   <- 1 user in 100 waits ~50x longer than the median\")\nprint()\nprint(\"the mean averaged the pain away; the percentiles kept it. Alert on p99, not the mean.\")"
+    },
+    {
+      "type": "md",
+      "source": "## 983 · Batching round trips\n\nCombine many small network or disk operations into one request, paying the fixed per-trip latency once instead of N times.\n\n*The courier stops making a hundred round trips for a hundred parcels and loads one truck: the fixed toll per trip — the network round-trip — is paid once instead of a hundred times.*\n\nWatch: the cost model is printed in the code (0.002 s per CALL + 0.0001 s per item). Predict both timings arithmetically before running; exact milliseconds wobble, the ~20x ratio does not."
+    },
+    {
+      "type": "code",
+      "source": "import time\n\ndef fake_api(items):\n    time.sleep(0.002)                  # fixed per-CALL overhead: the network round trip\n    time.sleep(0.0001 * len(items))    # marginal per-item work\n    return [x * 2 for x in items]\n\nitems = list(range(100))\n\nt0 = time.perf_counter()\nfor x in items:\n    fake_api([x])                      # 100 round trips: pay the toll 100 times\nchatty = time.perf_counter() - t0\n\nt0 = time.perf_counter()\nfake_api(items)                        # 1 round trip: pay the toll once\nbatched = time.perf_counter() - t0\n\nprint(f\"100 single-item calls : {chatty * 1000:7.1f} ms   (100 x overhead + 100 x item)\")\nprint(f\"  1 batched call(100) : {batched * 1000:7.1f} ms   (  1 x overhead + 100 x item)\")\nprint(f\"speedup               : {chatty / batched:5.1f}x\")\nprint()\nprint(\"same work per item -- the win is paying the fixed per-trip cost once instead of N times\")"
+    },
+    {
+      "type": "md",
+      "source": "## 991 · Structured logging\n\nEmit logs as key-value events (JSON) with level, timestamp, and correlation IDs — machine-queryable, not prose strings.\n\n*The librarian swaps diary scrawl for index cards with labeled fields — user_id: 42, order: A7, ms: 340 — and suddenly a machine finds every card where ms > 1000 in seconds.*\n\nWatch: four events go in, then one dict-lookup filter (`user == \"ada\"`) pulls exactly the right three back out — including the WARNING. Predict which three. Try writing that query against prose logs."
+    },
+    {
+      "type": "code",
+      "source": "import json, logging, itertools\n\n_tick = itertools.count()\n\nclass JsonFormatter(logging.Formatter):\n    def format(self, record):\n        return json.dumps({\n            \"ts\": f\"2026-07-11T12:00:{next(_tick):02d}Z\",   # fixed clock -> deterministic output\n            \"level\": record.levelname,\n            \"event\": record.getMessage(),\n            \"user\": getattr(record, \"user\", None),\n        })\n\nclass ListHandler(logging.Handler):\n    def __init__(self):\n        super().__init__()\n        self.lines = []\n    def emit(self, record):\n        self.lines.append(self.format(record))\n\nlog = logging.getLogger(\"shop\")\nlog.setLevel(logging.INFO)\nlog.propagate = False\nhandler = ListHandler()\nhandler.setFormatter(JsonFormatter())\nlog.handlers = [handler]\n\nlog.info(\"login\",            extra={\"user\": \"ada\"})\nlog.info(\"add_to_cart\",      extra={\"user\": \"grace\"})\nlog.warning(\"payment_retry\", extra={\"user\": \"ada\"})\nlog.info(\"logout\",           extra={\"user\": \"ada\"})\n\nprint(\"raw log lines (one JSON object per event):\")\nfor line in handler.lines:\n    print(\" \", line)\n\nevents = [json.loads(line) for line in handler.lines]      # machine-parseable\nada_events = [e for e in events if e[\"user\"] == \"ada\"]\nprint()\nprint(f\"query: user == 'ada'  ->  {len(ada_events)} events\")\nfor e in ada_events:\n    print(f\"  {e['ts']}  {e['level']:<7}  {e['event']}\")\nprint()\nprint(\"try that filter against prose like 'Ada logged in OK!!' -- keys beat grep-and-pray\")"
+    }
+  ]
+}
