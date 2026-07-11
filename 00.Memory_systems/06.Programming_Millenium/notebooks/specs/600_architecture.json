@@ -1,0 +1,113 @@
+{
+  "notebook": "600_architecture",
+  "cells": [
+    {
+      "type": "md",
+      "source": "# 600 · Architecture & design patterns — procedural layer\n\n**Mnemonic: SIX sides of the hexagon — hexagonal architecture.**\n\nCodes covered: **603** Builder · **612** Decorator · **621** Observer · **631** Template method · **645** Dependency rule · **654** Constructor injection · **665** Unidirectional data flow · **674** Event sourcing · **683** Backward compatibility · **692** Value object\n\n**Method:** for every code cell — read it, PREDICT the exact output, run it, compare. A misprediction is the lesson: reread the definition, fix your mental model, run again. Cells run top to bottom in a single kernel; only the marked cell in 683 is allowed to raise."
+    },
+    {
+      "type": "md",
+      "source": "## 603 · Builder\n\nConstructs a complex object step by step through a fluent or staged API, separating construction from the final representation.\n\n*A Subway sandwich artist: bread? cheese? toasted? Each shout adds one layer, and only the final 'wrap it up!' (build) hands you the finished sub.*\n\n**Watch:** every method returns `self`, so the calls chain — and each shout prints as it lands. Nothing finished exists until `.build()`, which hands back an immutable tuple."
+    },
+    {
+      "type": "code",
+      "source": "class ConfigBuilder:\n    def __init__(self):\n        self._parts = {}\n        print(\"ConfigBuilder()            # empty counter, nothing built yet\")\n    def host(self, h):\n        self._parts[\"host\"] = h; print(f\"  .host({h!r})\"); return self\n    def port(self, p):\n        self._parts[\"port\"] = p; print(f\"  .port({p})\"); return self\n    def tls(self):\n        self._parts[\"tls\"] = True; print(\"  .tls()\"); return self\n    def build(self):\n        print(\"  .build()                 # wrap it up!\")\n        return tuple(sorted(self._parts.items()))   # immutable final object\n\nconfig = ConfigBuilder().host(\"db.local\").port(5432).tls().build()\nprint(\"final immutable config:\", config)"
+    },
+    {
+      "type": "md",
+      "source": "## 612 · Decorator\n\nWraps an object behind the SAME interface to add responsibilities dynamically; wrappers stack in layers.\n\n*A Christmas tree gaining lights, then tinsel, then baubles — at every layer it still answers to 'tree', just fancier each time you wrap it.*\n\n**Watch:** every layer exposes the same `.write()`. The call travels inward to the plain `Writer`, then each wrapper transforms the result on the way back out — so STACKING ORDER matters. Predict both outputs before running the second cell."
+    },
+    {
+      "type": "code",
+      "source": "class Writer:\n    def write(self, text):\n        return text\n\nclass UpperCaseWriter:                    # same .write() interface, adds SHOUTING\n    def __init__(self, inner): self.inner = inner\n    def write(self, text): return self.inner.write(text).upper()\n\nclass ExclaimWriter:                      # same .write() interface, adds enthusiasm\n    def __init__(self, inner): self.inner = inner\n    def write(self, text): return self.inner.write(text) + \" ... wow!\"\n\nstack = ExclaimWriter(UpperCaseWriter(Writer()))\nprint(\"Exclaim(Upper(Writer)):\", stack.write(\"hello world\"))"
+    },
+    {
+      "type": "code",
+      "source": "swapped = UpperCaseWriter(ExclaimWriter(Writer()))\nprint(\"Upper(Exclaim(Writer)):\", swapped.write(\"hello world\"))\nprint(\"same three layers, different order -> different output: order matters\")"
+    },
+    {
+      "type": "md",
+      "source": "## 621 · Observer\n\nA subject keeps a list of subscribers and notifies them automatically when its state changes — one-to-many, publisher pushes.\n\n*A lighthouse blinks once and every ship's bell on the horizon rings itself — each ship had signed the lighthouse's ledger to be notified.*\n\n**Watch:** one `notify()` fans out to every subscribed ship. After Borealis unsubscribes, the second blink reaches only Aurora — predict each ship's final `received` list."
+    },
+    {
+      "type": "code",
+      "source": "class Ship:\n    def __init__(self, name): self.name, self.received = name, []\n    def on_event(self, event): self.received.append(event)\n\nclass Lighthouse:\n    def __init__(self): self._ledger = []\n    def subscribe(self, ship): self._ledger.append(ship)\n    def unsubscribe(self, ship): self._ledger.remove(ship)\n    def notify(self, event):\n        print(f\"lighthouse emits {event!r} -> {len(self._ledger)} ship(s)\")\n        for ship in self._ledger: ship.on_event(event)\n\naurora, borealis = Ship(\"Aurora\"), Ship(\"Borealis\")\nlight = Lighthouse()\nlight.subscribe(aurora); light.subscribe(borealis)\nlight.notify(\"blink-1\")\nlight.unsubscribe(borealis)\nlight.notify(\"blink-2\")\nprint(\"Aurora   received:\", aurora.received)\nprint(\"Borealis received:\", borealis.received)"
+    },
+    {
+      "type": "md",
+      "source": "## 631 · Template method\n\nA base-class method fixes an algorithm's skeleton and defers specific steps to subclass hook overrides.\n\n*A Mad Libs card: the plot is printed in permanent ink; subclasses may only scribble words into the blanks, then the card reads itself aloud.*\n\n**Watch:** `run()` is never overridden — load → process → report happens in permanent ink for both subclasses. Only the `process()` blank differs. Predict both report lines."
+    },
+    {
+      "type": "code",
+      "source": "class Pipeline:\n    def run(self):                        # the skeleton, printed in permanent ink\n        data = self.load()\n        result = self.process(data)      # the blank subclasses fill in\n        self.report(data, result)\n    def load(self): return [3, 1, 2]\n    def process(self, data): raise NotImplementedError(\"subclass fills the blank\")\n    def report(self, data, result):\n        print(f\"{type(self).__name__}: {data} -> {result}\")\n\nclass SortPipeline(Pipeline):\n    def process(self, data): return sorted(data)\n\nclass SumPipeline(Pipeline):\n    def process(self, data): return sum(data)\n\nSortPipeline().run()\nSumPipeline().run()"
+    },
+    {
+      "type": "md",
+      "source": "## 645 · Dependency rule\n\nSource-code dependencies may only point inward: inner circles know nothing — not even names — of anything in outer circles.\n\n*A one-way pilgrimage road spiraling into a mountain shrine: carts roll inward only, and the monks inside have never once heard the market's name.*\n\n**Watch:** `compute_invoice` is pure — no imports, no I/O, no idea who calls it. First it runs alone (testable in isolation); then two different adapters call INWARD to it and get the identical answer."
+    },
+    {
+      "type": "code",
+      "source": "# THE DOMAIN CORE — pure function, zero I/O, knows nothing of the outside world\ndef compute_invoice(items):\n    subtotal = sum(qty * price for _name, qty, price in items)\n    tax = round(subtotal * 0.20, 2)\n    return {\"subtotal\": subtotal, \"tax\": tax, \"total\": round(subtotal + tax, 2)}\n\n# testable completely alone — no CLI, no DB, no framework required:\nprint(\"domain alone   ->\", compute_invoice([(\"book\", 2, 10.0), (\"pen\", 5, 1.5)]))"
+    },
+    {
+      "type": "code",
+      "source": "# THE OUTER RING — adapters depend on (call) the domain; the domain never calls back\ndef cli_adapter(argv):                                 # port 1: command line\n    items = [(n, int(q), float(p)) for n, q, p in (a.split(\":\") for a in argv)]\n    print(\"CLI adapter    ->\", compute_invoice(items))\n\ndef fake_db_adapter():                                 # port 2: persistence\n    rows = [(\"book\", 2, 10.0), (\"pen\", 5, 1.5)]        # pretend SELECT result\n    print(\"fake-DB adapter->\", compute_invoice(rows))\n\ncli_adapter([\"book:2:10.0\", \"pen:5:1.5\"])\nfake_db_adapter()\nprint(\"identical result under both adapters — the shrine never heard the market's name\")"
+    },
+    {
+      "type": "md",
+      "source": "## 654 · Constructor injection\n\nDependencies arrive as constructor parameters, making them mandatory, visible, and enabling immutable, always-valid objects.\n\n*A spaceship that physically cannot launch until every crew member is strapped in at ignition — and the hatch welds itself shut after liftoff (immutability).*\n\n**Watch:** `OrderService` cannot exist without a repo — it's strapped in at `__init__`. The second cell swaps in a `FakeRepo` that only records calls: the service code never changes, and the fake's call log makes it trivially testable."
+    },
+    {
+      "type": "code",
+      "source": "class OrderService:\n    def __init__(self, repo):             # dependency strapped in at ignition\n        self._repo = repo                 # no launch without it\n    def place(self, order_id, item):\n        self._repo.save(order_id, item)\n        return f\"order {order_id} placed\"\n\nclass RealRepo:                           # 'production' repo, dict-backed\n    def __init__(self): self._db = {}\n    def save(self, key, value): self._db[key] = value\n\nreal = RealRepo()\nservice = OrderService(real)\nprint(service.place(1, \"espresso\"))\nprint(\"real repo contents:\", real._db)"
+    },
+    {
+      "type": "code",
+      "source": "class FakeRepo:                           # test double — records calls, stores nothing\n    def __init__(self): self.calls = []\n    def save(self, key, value): self.calls.append((\"save\", key, value))\n\nfake = FakeRepo()\nservice = OrderService(fake)              # same service class, swapped dependency\nprint(service.place(2, \"latte\"))\nprint(service.place(3, \"mocha\"))\nprint(\"fake's call log:\", fake.calls)\nprint(\"OrderService unchanged — the constructor made the swap trivial\")"
+    },
+    {
+      "type": "md",
+      "source": "## 665 · Unidirectional data flow\n\nState flows down as props and changes flow up as events or actions through one loop, making every mutation traceable.\n\n*A one-way water park: state pours down the slide into the views below; riders send wishes back up only via the message-balloon chimney (actions). No swimming upstream.*\n\n**Watch:** the reducer never mutates — it returns a NEW state for each action, and every transition prints, so the whole history is traceable. Predict the state after each of the four actions."
+    },
+    {
+      "type": "code",
+      "source": "def reducer(state, action):               # (old state, action) -> NEW state\n    kind, payload = action\n    if kind == \"add\":    return state + [payload]\n    if kind == \"remove\": return [x for x in state if x != payload]\n    if kind == \"rename\":\n        old, new = payload\n        return [new if x == old else x for x in state]\n    return state\n\nactions = [(\"add\", \"draft\"), (\"add\", \"todo\"),\n           (\"rename\", (\"draft\", \"final\")), (\"remove\", \"todo\")]\nstate = []\nfor action in actions:\n    state = reducer(state, action)        # one loop, one direction\n    print(f\"{str(action):32} -> {state}\")\nprint(\"final state:\", state)"
+    },
+    {
+      "type": "md",
+      "source": "## 674 · Event sourcing\n\nPersist every state change as an immutable event; current state is derived by replaying the log, which is the system of record.\n\n*An accountant's ink ledger: nobody erases, ever; a mistake gets a correcting line, and today's balance is re-summed from page one whenever anyone asks.*\n\n**Watch:** state is a fold over the log — replaying the same log yields the same balance, every time. The second cell appends one new event (the only legal write) and re-folds: history and state are printed side by side."
+    },
+    {
+      "type": "code",
+      "source": "events = [(\"deposited\", 100), (\"withdrawn\", 30), (\"deposited\", 50)]   # append-only log\n\ndef fold(log):\n    balance = 0\n    for kind, amount in log:\n        balance += amount if kind == \"deposited\" else -amount\n    return balance\n\nprint(\"state from fold:   \", fold(events))\nprint(\"REPLAY (same log): \", fold(events), \"  <- replaying always rebuilds the same state\")"
+    },
+    {
+      "type": "code",
+      "source": "events.append((\"withdrawn\", 20))          # append-only: never edit, never erase\nprint(\"history (the system of record):\")\nfor i, event in enumerate(events):\n    print(f\"  page {i}: {event}\")\nprint(\"current state (re-folded):\", fold(events))\nprint(\"the log IS the data; state is just a projection of it\")"
+    },
+    {
+      "type": "md",
+      "source": "## 683 · Backward compatibility\n\nEvolve APIs additively — add optional fields, never rename, remove, or retype — while clients ignore unknown fields (tolerant reader).\n\n*Grandma's recipe card with extra sticky notes stapled on: old cooks simply ignore the staples and the cake still rises — but no one may ever cross out a line.*\n\n**Watch:** v2 staples on `email` and the old client keeps working, blissfully ignoring it. v3 crosses out a line (renames `name` → `full_name`) — the next cell INTENTIONALLY raises: read the traceback and see exactly which client broke and why."
+    },
+    {
+      "type": "code",
+      "source": "def api_v1(user_id):\n    return {\"name\": \"Ada\"}\n\ndef api_v2(user_id):                      # additive change: a sticky note stapled on\n    return {\"name\": \"Ada\", \"email\": \"ada@example.com\"}\n\ndef old_client(api):                      # written against v1, reads only 'name'\n    return f\"Hello, {api(42)['name']}!\"\n\nprint(\"old client on v1:\", old_client(api_v1))\nprint(\"old client on v2:\", old_client(api_v2), \" <- unknown field ignored, still works\")"
+    },
+    {
+      "type": "code",
+      "source": "# INTENDED ERROR — read the traceback\ndef api_v3(user_id):                      # BREAKING change: renamed name -> full_name\n    return {\"full_name\": \"Ada Lovelace\"}\n\nprint(\"old client on v3:\")\nprint(old_client(api_v3))                 # KeyError: 'name' — renames break old clients"
+    },
+    {
+      "type": "md",
+      "source": "## 692 · Value object\n\nAn immutable object defined entirely by its attribute values, with no identity; equal fields mean interchangeable objects.\n\n*Two identical 2x4 red LEGO bricks: shuffle them behind your back and nobody can ever tell. To 'change' one's color you don't repaint — you pick up a different brick.*\n\n**Watch:** two `Money` objects with equal fields are `==` and mutation is physically refused (`FrozenInstanceError`, caught in-cell). The second cell shows the contrast: `User` ENTITIES compare by `id` — same name but different ids are `!=`, and renaming an entity doesn't change who it is."
+    },
+    {
+      "type": "code",
+      "source": "from dataclasses import dataclass, FrozenInstanceError\n\n@dataclass(frozen=True)\nclass Money:                              # value object: all fields, no identity\n    amount: int\n    currency: str\n\na, b = Money(10, \"EUR\"), Money(10, \"EUR\")\nprint(\"Money(10,'EUR') == Money(10,'EUR') ->\", a == b, \" (equal fields = interchangeable)\")\ntry:\n    a.amount = 99                         # you don't repaint a brick...\nexcept FrozenInstanceError as e:\n    print(\"mutation blocked:\", type(e).__name__, \"-\", e)\nprint(\"...you pick up a different brick:\", Money(99, \"EUR\"))"
+    },
+    {
+      "type": "code",
+      "source": "class User:                               # entity: defined by identity, not fields\n    def __init__(self, uid, name): self.id, self.name = uid, name\n    def __eq__(self, other): return isinstance(other, User) and self.id == other.id\n    def __repr__(self): return f\"User(id={self.id}, name={self.name!r})\"\n\nu1, u2 = User(1, \"Ada\"), User(2, \"Ada\")\nprint(u1, \"==\", u2, \"->\", u1 == u2, \" (same name, different identity)\")\nu1.name = \"Ada Lovelace\"                  # entities may mutate over their lifetime\nprint(\"after rename:\", u1, \"==\", User(1, \"Ada\"), \"->\", u1 == User(1, \"Ada\"))\nprint(\"same id -> still the same entity, whatever the fields now say\")"
+    }
+  ]
+}

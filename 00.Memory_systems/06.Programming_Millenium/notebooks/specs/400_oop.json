@@ -1,0 +1,121 @@
+{
+ "notebook": "400_oop",
+ "cells": [
+  {
+   "type": "md",
+   "source": "# 400 · Object-oriented design — procedural layer\n\n**Domain mnemonic — the FOUR pillars:** encapsulation, abstraction, inheritance, polymorphism.\n\nCodes covered: **406** this / self · **413** class invariant · **427** diamond problem · **439** replace switch-on-type with polymorphism · **444** preconditions & postconditions · **451** composition over inheritance · **467** strategy as OCP enabler · **471** rectangle-square problem · **485** equals/hashCode contract · **498** extract method.\n\n**Method:** read the cell → **predict the output** → run it → compare. The matrix holds the imagery; this notebook engraves the net effect. Cells run top to bottom in one kernel. Three cells raise on purpose — their first line says so, and the traceback itself is the output to study."
+  },
+  {
+   "type": "md",
+   "source": "## 406 · this / self\n\nThe implicit reference to the current instance inside a method, used to reach that object's own fields and methods.\n\n*Every method opens by snapping a SELFIE: the first parameter is always a picture of the very object doing the talking.*\n\nWatch: `obj.method()` is nothing but sugar for `Class.method(obj)` — Python always passes the instance as the first argument, and a bound method is just the function pre-loaded with `self`."
+  },
+  {
+   "type": "code",
+   "source": "class Greeter:\n    def __init__(self, name):\n        self.name = name\n\n    def hello(self):\n        return \"Hello, I'm \" + self.name\n\ng = Greeter(\"Ada\")\nprint(\"g.hello()        ->\", g.hello())\nprint(\"Greeter.hello(g) ->\", Greeter.hello(g))\nprint(\"same result?     ->\", g.hello() == Greeter.hello(g), \" # obj.method() IS Class.method(obj)\")\nprint()\nprint(\"g.hello without parentheses is a\", type(g.hello).__name__, \"object:\")\nprint(\"  its __self__ is g            ->\", g.hello.__self__ is g)\nprint(\"  its __func__ is Greeter.hello ->\", g.hello.__func__ is Greeter.hello)\nprint(\"A bound method = plain function + the selfie already glued in as argument one.\")"
+  },
+  {
+   "type": "code",
+   "source": "class Broken:\n    def shout():          # forgot self!\n        return \"HELLO\"\n\nprint(\"Called on the CLASS, it is a plain function -> Broken.shout() =\", Broken.shout())\nprint()\nb = Broken()\nprint(\"But on an INSTANCE, b.shout() would fail, because b.shout() is Broken.shout(b):\")\nprint(\"Python passes the instance as argument 1 to a function declared with 0 parameters.\")\nprint(\"It would raise: TypeError: shout() takes 0 positional arguments but 1 was given\")\nprint(\"Moral: the selfie parameter is not optional decoration — the machinery relies on it.\")"
+  },
+  {
+   "type": "md",
+   "source": "## 413 · Class invariant\n\nA condition on object state that must hold between all public calls (e.g. `balance >= 0`); every method must restore it before returning.\n\n*A tightrope walker's balance bar: each trick (method) may wobble it mid-air, but he must be dead level again before the crowd looks up.*\n\nWatch: the property setter is the single checkpoint every state change passes through — legal updates sail through, and the one that would leave the object in an illegal state is refused with a `ValueError` before the damage lands."
+  },
+  {
+   "type": "code",
+   "source": "class BankAccount:\n    def __init__(self, opening):\n        self._balance = 0\n        self.balance = opening        # even birth goes through the checkpoint\n\n    @property\n    def balance(self):\n        return self._balance\n\n    @balance.setter\n    def balance(self, value):\n        if value < 0:\n            raise ValueError(\"invariant violated: balance must be >= 0, got \" + str(value))\n        self._balance = value\n\nacct = BankAccount(100)\nprint(\"opened with            ->\", acct.balance)\nacct.balance += 50                    # deposit: getter, then setter re-checks\nprint(\"after +50 deposit      ->\", acct.balance)\nacct.balance -= 120                   # withdrawal within funds\nprint(\"after -120 withdrawal  ->\", acct.balance)\nprint(\"invariant balance >= 0 held between every public call\")"
+  },
+  {
+   "type": "code",
+   "source": "# INTENDED ERROR — read the traceback\n# Withdrawing 999 from 30 would leave the balance at -969; the setter refuses to\n# let the object exist in that state — the tightrope bar never stays tilted.\nprint(\"attempting: acct.balance -= 999   (balance is\", acct.balance, \")\")\nacct.balance -= 999"
+  },
+  {
+   "type": "md",
+   "source": "## 427 · Diamond problem\n\nIn multiple inheritance, inheriting one ancestor through two parents makes it ambiguous which inherited version applies.\n\n*A family-reunion photo shaped like a DIAMOND: one grandma on top, two parents at the sides, one kid at the bottom clutching two conflicting heirloom recipes for the same pie.*\n\nWatch: with cooperative `super().__init__()`, D's constructor visits **every** class exactly once, in MRO order — the shared grandparent A runs a single time, not twice. `D.__mro__` is the C3 linearization that turns the ambiguous diamond into one deterministic queue."
+  },
+  {
+   "type": "code",
+   "source": "class A:\n    def __init__(self):\n        print(\"A.__init__   (shared grandparent — note it runs exactly ONCE)\")\n\nclass B(A):\n    def __init__(self):\n        print(\"B.__init__   -> handing off via super()\")\n        super().__init__()\n\nclass C(A):\n    def __init__(self):\n        print(\"C.__init__   -> handing off via super()\")\n        super().__init__()\n\nclass D(B, C):\n    def __init__(self):\n        print(\"D.__init__   -> handing off via super()\")\n        super().__init__()\n\nprint(\"Constructing D() — predict the order of the four lines:\")\nd = D()\nprint()\nprint(\"C3 linearization (MRO) — the deterministic answer to 'whose method wins?':\")\nprint(\"  \" + \" -> \".join(cls.__name__ for cls in D.__mro__))"
+  },
+  {
+   "type": "md",
+   "source": "## 439 · Replace switch-on-type with polymorphism\n\nRefactoring: turn if/switch chains on type tags into an overridden method, so adding a type requires no edits to existing branches.\n\n*A hallway of doors, each with its own doorman, replaces the lobby clerk flipping a giant laminated flowchart ('if wolf... elif duck...'). New guest? Just add a door.*\n\nWatch: both approaches agree while the type list is frozen. The second cell adds one new class — the polymorphic dispatcher needs **zero** changes, while the isinstance chain falls straight into its else branch."
+  },
+  {
+   "type": "code",
+   "source": "class Dog:\n    def speak(self):\n        return \"Woof\"\n\nclass Cat:\n    def speak(self):\n        return \"Meow\"\n\n# Approach 1 — the lobby clerk's flowchart: a switch on type tags\ndef speak_switch(animal):\n    if isinstance(animal, Dog):\n        return \"Woof\"\n    elif isinstance(animal, Cat):\n        return \"Meow\"\n    else:\n        return \"??? (speak_switch must be EDITED for every new type)\"\n\n# Approach 2 — each class owns its door: polymorphic dispatch\ndef speak_poly(animal):\n    return animal.speak()\n\nzoo = [Dog(), Cat()]\nfor a in zoo:\n    print(type(a).__name__.ljust(5), \"| switch:\", speak_switch(a).ljust(4), \"| poly:\", speak_poly(a))"
+  },
+  {
+   "type": "code",
+   "source": "# A NEW type arrives. Count the edits each approach demands.\nclass Duck:\n    def speak(self):\n        return \"Quack\"      # the new door brings its own doorman\n\nzoo.append(Duck())\nprint(\"speak_poly needed ZERO changes; speak_switch is now wrong for Duck:\")\nfor a in zoo:\n    print(type(a).__name__.ljust(5), \"| switch:\", speak_switch(a).ljust(4), \"| poly:\", speak_poly(a))\nprint()\nprint(\"The branches did not disappear — they moved into the types, where new code lives.\")"
+  },
+  {
+   "type": "md",
+   "source": "## 444 · Preconditions & postconditions\n\nPrecondition: what must be true before a call (caller's duty). Postcondition: what the method guarantees afterward (callee's duty).\n\n*Airport rules: YOU must show up with a valid boarding pass (pre); the AIRLINE must land your suitcase on the belt (post). Each side owns its clause.*\n\nWatch: the `@require` decorator checks the caller's clause at the door; the `assert` inside the function checks the callee's clause on the way out. When the error cell fires, read WHO broke the contract — the traceback blames the caller's argument, not the function's logic."
+  },
+  {
+   "type": "code",
+   "source": "import functools\n\ndef require(check, message):\n    \"\"\"Precondition decorator: the boarding-pass check at the gate (caller's duty).\"\"\"\n    def decorator(fn):\n        @functools.wraps(fn)\n        def wrapper(*args, **kwargs):\n            assert check(*args, **kwargs), \"precondition violated: \" + message\n            return fn(*args, **kwargs)\n        return wrapper\n    return decorator\n\n@require(lambda x: x >= 0, \"x must be >= 0\")\ndef integer_sqrt(x):\n    r = int(x ** 0.5)\n    # postcondition — the airline's duty: r is the floor of the true square root\n    assert r * r <= x < (r + 1) * (r + 1), \"postcondition violated\"\n    return r\n\nprint(\"integer_sqrt(49) ->\", integer_sqrt(49))\nprint(\"integer_sqrt(50) ->\", integer_sqrt(50))\nprint(\"pre held at the gate (caller's duty); post held on landing (callee's duty)\")"
+  },
+  {
+   "type": "code",
+   "source": "# INTENDED ERROR — read the traceback\n# The CALLER breaks the contract: -9 has no boarding pass for x >= 0.\n# The AssertionError fires in the wrapper, BEFORE integer_sqrt's body ever runs.\nprint(\"attempting: integer_sqrt(-9)\")\ninteger_sqrt(-9)"
+  },
+  {
+   "type": "md",
+   "source": "## 451 · Composition over inheritance\n\nPrefer assembling behavior from contained parts over subclassing: fewer hierarchy traps, and parts stay swappable at runtime.\n\n*Two robot builders: one WELDS his robot onto grandpa's chassis forever (inheritance); the other clicks modules on and off in seconds and wins the derby. Buy LEGO, not welds.*\n\nWatch: `Car` HAS-A engine, so changing behavior is one attribute assignment on a live object — no `PetrolCar` / `ElectricCar` subclasses anywhere, and the same car object hums after it vroomed."
+  },
+  {
+   "type": "code",
+   "source": "class PetrolEngine:\n    def start(self):\n        return \"vroom (petrol combustion)\"\n\nclass ElectricEngine:\n    def start(self):\n        return \"hummm (electric motor)\"\n\nclass Car:\n    def __init__(self, engine):\n        self.engine = engine              # HAS-A: a clicked-on module, not a weld\n\n    def drive(self):\n        return \"Car driving: \" + self.engine.start()\n\ncar = Car(PetrolEngine())\nprint(car.drive())\n\ncar.engine = ElectricEngine()             # swap the part at RUNTIME\nprint(car.drive())\nprint()\nprint(\"Same Car object, same Car class, new behavior — zero subclassing.\")\nprint(\"An inherited PetrolCar would have needed a rebuild; the module just clicked off.\")"
+  },
+  {
+   "type": "md",
+   "source": "## 467 · Strategy as OCP enabler\n\nEncapsulate interchangeable algorithms behind one interface and inject the choice, so new variants extend without editing callers.\n\n*A chess coach's binder of laminated STRATEGY cards: slide 'Sicilian' out, slide 'King's Gambit' in — the player (context) plays whatever card sits in the sleeve, never rewired.*\n\nWatch: `price()` and the existing strategies are never touched. The second cell extends the system by sliding one new card into the binder — a dict entry — and everything downstream just works: open for extension, closed for modification."
+  },
+  {
+   "type": "code",
+   "source": "def flat_rate(total):\n    return round(total + 5.00, 2)         # fixed handling fee\n\ndef by_weight(total):\n    return round(total * 1.10, 2)         # +10% freight surcharge\n\nPRICING = {\n    \"flat\": flat_rate,\n    \"weight\": by_weight,\n}\n\ndef price(total, strategy):\n    return PRICING[strategy](total)       # the context: plays whatever card is in the sleeve\n\nfor name in [\"flat\", \"weight\"]:\n    print(name.rjust(8), \": 100.00 ->\", format(price(100.00, name), \".2f\"))"
+  },
+  {
+   "type": "code",
+   "source": "# EXTENSION, not modification: one new card slides into the binder.\n# price(), flat_rate, by_weight — all untouched.\ndef member_discount(total):\n    return round(total * 0.85, 2)         # loyal customers pay 85%\n\nPRICING[\"member\"] = member_discount\n\nfor name in [\"flat\", \"weight\", \"member\"]:\n    print(name.rjust(8), \": 100.00 ->\", format(price(100.00, name), \".2f\"))\nprint()\nprint(\"New behavior arrived as pure addition — the Open/Closed Principle in one dict entry.\")"
+  },
+  {
+   "type": "md",
+   "source": "## 471 · Rectangle-square problem\n\nClassic LSP violation: a Square subclassing Rectangle breaks code that sets width and height independently.\n\n*A stretching machine grabs a 'rectangle' by both handles; the square SCREAMS as both its sides move together, crushing the operator's test gauge.*\n\nWatch: the client function was written against Rectangle's contract — width and height move independently. Square keeps its sides locked together, so `height = 5` silently overwrites `width = 4`, and 20 becomes 25 with no exception anywhere. That silence is the whole danger."
+  },
+  {
+   "type": "code",
+   "source": "class Rectangle:\n    def __init__(self):\n        self._w = 0\n        self._h = 0\n\n    @property\n    def width(self):\n        return self._w\n\n    @width.setter\n    def width(self, v):\n        self._w = v\n\n    @property\n    def height(self):\n        return self._h\n\n    @height.setter\n    def height(self, v):\n        self._h = v\n\n    def area(self):\n        return self._w * self._h\n\nclass Square(Rectangle):\n    \"\"\"Mathematically IS-A rectangle — behaviorally, the sides are welded together.\"\"\"\n    @Rectangle.width.setter\n    def width(self, v):\n        self._w = v\n        self._h = v\n\n    @Rectangle.height.setter\n    def height(self, v):\n        self._w = v\n        self._h = v\n\ndef stretch_to_4x5(shape):\n    \"\"\"Client code written against Rectangle's contract: the two sides are independent.\"\"\"\n    shape.width = 4\n    shape.height = 5\n    expected, got = 20, shape.area()\n    verdict = \"OK\" if got == expected else \"LSP VIOLATED\"\n    print(type(shape).__name__.rjust(9), \": expected area\", expected, \"| got\", got, \"->\", verdict)\n\nstretch_to_4x5(Rectangle())\nstretch_to_4x5(Square())\nprint()\nprint(\"No exception was raised — the subclass broke the client SILENTLY.\")\nprint(\"Substitutability is about behavior, not about what the type checker accepts.\")"
+  },
+  {
+   "type": "md",
+   "source": "## 485 · equals/hashCode contract\n\nIf two objects are equal they MUST have equal hash codes; violating this silently breaks hash sets and dict lookups.\n\n*A coat check: the clerk files coats by ticket number (hash), then confirms by face (equals). Twins holding different ticket numbers means one coat is lost in the wrong rack forever.*\n\nWatch: Python enforces half the contract for you — defining `__eq__` alone sets `__hash__` to `None`, making instances unhashable (the error cell). The fix is a `__hash__` built from the **same fields** as `__eq__`, so equal twins always hold equal ticket numbers."
+  },
+  {
+   "type": "code",
+   "source": "class Point:\n    def __init__(self, x, y):\n        self.x, self.y = x, y\n\n    def __eq__(self, other):\n        return isinstance(other, Point) and (self.x, self.y) == (other.x, other.y)\n\np, q = Point(1, 2), Point(1, 2)\nprint(\"p == q ?               \", p == q)\nprint(\"Point.__hash__ is None?\", Point.__hash__ is None, \"  # defining __eq__ alone DISABLES hashing\")\nprint(\"Equal faces, but no ticket numbers — these Points cannot enter a set or key a dict.\")"
+  },
+  {
+   "type": "code",
+   "source": "# INTENDED ERROR — read the traceback\n# __eq__ without __hash__ makes instances unhashable: the coat check cannot\n# file a coat that has a face but no ticket number.\nprint(\"attempting: {Point(1, 2)}\")\ns = {Point(1, 2)}"
+  },
+  {
+   "type": "code",
+   "source": "class HashablePoint:\n    def __init__(self, x, y):\n        self.x, self.y = x, y\n\n    def __eq__(self, other):\n        return isinstance(other, HashablePoint) and (self.x, self.y) == (other.x, other.y)\n\n    def __hash__(self):\n        return hash((self.x, self.y))     # SAME fields as __eq__ -> contract holds\n\na, b = HashablePoint(1, 2), HashablePoint(1, 2)\nprint(\"a == b ?              \", a == b)\nprint(\"hash(a) == hash(b) ?  \", hash(a) == hash(b), \"  # equal objects, equal tickets\")\ncoats = {a}\nprint(\"b in {a} ?            \", b in coats, \"  # the set finds the equal twin\")\nlabels = {a: \"checked in\"}\nprint('labels[b]              ->', repr(labels[b]), \"  # dict lookup by an equal key works\")"
+  },
+  {
+   "type": "md",
+   "source": "## 498 · Extract method\n\nRefactoring: pull a coherent code fragment into a new well-named method and call it, turning comments into names.\n\n*A dentist EXTRACTS one tangled tooth from the jaw (long method) and mounts it on its own little stand with a nameplate — the jaw finally closes, and the tooth can be inspected alone.*\n\nWatch: the `# -- section --` comments in v1 are begging to be names. v2 rebuilds the exact same report from three named helpers, and the final `assert` proves the refactor changed the shape of the code without changing its behavior."
+  },
+  {
+   "type": "code",
+   "source": "def report_v1(orders):\n    # one long function: header, body and footer all tangled in a single jaw\n    lines = []\n    # -- format header --\n    lines.append(\"=\" * 30)\n    lines.append(\"SALES REPORT\".center(30))\n    lines.append(\"=\" * 30)\n    # -- format body --\n    total = 0\n    for name, qty, price in orders:\n        amount = qty * price\n        total += amount\n        lines.append(name.ljust(10) + str(qty).rjust(3) + \" x \" + format(price, \"6.2f\") + \" = \" + format(amount, \"7.2f\"))\n    # -- format footer --\n    lines.append(\"-\" * 30)\n    lines.append(\"TOTAL\".ljust(10) + format(total, \"20.2f\"))\n    return \"\\n\".join(lines)\n\norders = [(\"widget\", 3, 2.50), (\"gizmo\", 1, 9.99), (\"doodad\", 10, 0.75)]\nprint(report_v1(orders))"
+  },
+  {
+   "type": "code",
+   "source": "# Each commented block becomes a NAMED helper: the comment dies, the name survives.\ndef header(title, width=30):\n    return [\"=\" * width, title.center(width), \"=\" * width]\n\ndef body(orders):\n    lines, total = [], 0\n    for name, qty, price in orders:\n        amount = qty * price\n        total += amount\n        lines.append(name.ljust(10) + str(qty).rjust(3) + \" x \" + format(price, \"6.2f\") + \" = \" + format(amount, \"7.2f\"))\n    return lines, total\n\ndef footer(total, width=30):\n    return [\"-\" * width, \"TOTAL\".ljust(10) + format(total, \"20.2f\")]\n\ndef report_v2(orders):\n    body_lines, total = body(orders)\n    return \"\\n\".join(header(\"SALES REPORT\") + body_lines + footer(total))\n\nprint(report_v2(orders))\nprint()\nassert report_v2(orders) == report_v1(orders)\nprint(\"assert passed: byte-identical output — only the SHAPE of the code changed.\")"
+  }
+ ]
+}
