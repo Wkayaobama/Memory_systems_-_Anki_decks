@@ -1,0 +1,109 @@
+{
+  "notebook": "800_networking_distributed",
+  "cells": [
+    {
+      "type": "md",
+      "source": "# 800 · Networking, web & distributed — procedural layer\n\n**Mnemonic:** 8 = port 80; an infinity symbol of machines connected sideways.\n\n**Codes:** 808, 810, 820, 839, 843, 853, 864, 872, 883, 894\n\n**Method:** read each code cell, PREDICT the output, run it, compare. The gap between your prediction and what actually printed is exactly the thing to learn.\n\nAll demos are fully offline: loopback (127.0.0.1) sockets or pure in-process simulation. Nothing touches the external network, no cell takes more than a couple of seconds, and only one cell — clearly marked `# INTENDED ERROR` — raises on purpose."
+    },
+    {
+      "type": "md",
+      "source": "## 808 · Ports\n\nA 16-bit port number multiplexes many services on one IP; well-known ports (80, 443, 22) sit below 1024 and need root to bind.\n\n*One apartment building (the IP) with 65,535 numbered doors; the web server always answers door 80, SSH lurks behind door 22.*\n\n**Watch for:** binding to port 0 asks the OS for any free door — note the number it hands back (ephemeral range, usually 49152-65535). Then predict what happens when a second socket knocks on the very same door."
+    },
+    {
+      "type": "code",
+      "source": "import socket\n\ns1 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\ns1.settimeout(2)\ns1.bind(('127.0.0.1', 0))          # port 0 = \"OS, pick any free door for me\"\nport = s1.getsockname()[1]\nprint('OS assigned ephemeral port:', port)\nprint('well-known doors need root to bind: 80 (http), 443 (https), 22 (ssh)')\nprint('s1 keeps this door occupied for the next cell...')"
+    },
+    {
+      "type": "code",
+      "source": "# INTENDED ERROR — read the traceback\n# The door is taken: one process per (address, port). Predict the exception type.\ns2 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\ns2.settimeout(2)\ntry:\n    s2.bind(('127.0.0.1', port))   # same port s1 already holds -> OSError (address in use)\nfinally:\n    s2.close()                     # cleanup still runs, then the traceback prints\n    s1.close()\n    print('both sockets closed, port', port, 'is free again')"
+    },
+    {
+      "type": "md",
+      "source": "## 810 · TCP reliable byte stream\n\nTCP presents an ordered, lossless byte stream over unreliable IP by numbering, acknowledging, and retransmitting segments.\n\n*A conveyor belt built over a potholed road: crates below may drop and jumble, but the belt above delivers every byte smoothly in order.*\n\n**Watch for:** the client calls send() twice; the server calls recv() once. Predict exactly which bytes that single recv returns — where did the boundary between the two sends go?"
+    },
+    {
+      "type": "code",
+      "source": "import socket\nimport threading\nimport time\n\nready = threading.Event()   # server is listening\nsent = threading.Event()    # client has sent both messages\nresult = {}\n\ndef server(srv):\n    srv.listen(1)\n    ready.set()\n    conn, _ = srv.accept()\n    conn.settimeout(2)\n    sent.wait(2)                       # let the client finish BOTH sends first\n    time.sleep(0.1)                    # let both segments land in the receive buffer\n    result['data'] = conn.recv(1024)   # ONE recv for TWO sends\n    conn.close()\n\nsrv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\nsrv.settimeout(2)\nsrv.bind(('127.0.0.1', 0))\nt = threading.Thread(target=server, args=(srv,), daemon=True)\nt.start()\nready.wait(2)\n\ncli = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\ncli.settimeout(2)\ncli.connect(srv.getsockname())\ncli.send(b'hello')                     # send number one\ncli.send(b'world')                     # send number two\nsent.set()\nt.join(timeout=5)\ncli.close()\nsrv.close()\n\nprint(\"two sends : b'hello' then b'world'\")\nprint('one recv  :', result['data'])\nprint('TCP is a byte STREAM — the boundary between the two sends is simply gone')"
+    },
+    {
+      "type": "md",
+      "source": "## 820 · Request/response anatomy\n\nAn HTTP request is method + path + headers + optional body; the response is status line + headers + body — one exchange per request.\n\n*A restaurant order slip: the verb 'GET' scrawled on top, table notes (headers) below; the kitchen returns a numbered ticket (status) stapled to the dish (body).*\n\n**Watch for:** the three layers of the response — status line, headers, body — coming back as one exchange over a real (loopback) TCP connection. HTTP is just structured text framed on top of the 810 byte stream."
+    },
+    {
+      "type": "code",
+      "source": "import threading\nimport http.client\nfrom http.server import BaseHTTPRequestHandler, ThreadingHTTPServer\n\nclass Hello(BaseHTTPRequestHandler):\n    protocol_version = 'HTTP/1.1'            # needs Content-Length below\n    def do_GET(self):\n        body = b'{\"user\": 7, \"role\": \"admin\"}'\n        self.send_response(200)                              # status line\n        self.send_header('Content-Type', 'application/json') # headers\n        self.send_header('Content-Length', str(len(body)))\n        self.end_headers()\n        self.wfile.write(body)                               # body\n    def log_message(self, *args):\n        pass                                                 # keep the cell output clean\n\nhttpd = ThreadingHTTPServer(('127.0.0.1', 0), Hello)\nhttpd.timeout = 2\nt = threading.Thread(target=httpd.serve_forever, daemon=True)\nt.start()\n\nconn = http.client.HTTPConnection('127.0.0.1', httpd.server_address[1], timeout=2)\nconn.request('GET', '/users/7')      # method + path (+ Host header added for us)\nresp = conn.getresponse()\nprint(f'status line  : HTTP/{resp.version / 10} {resp.status} {resp.reason}')\nprint('Content-Type :', resp.getheader('Content-Type'))\nprint('Content-Length:', resp.getheader('Content-Length'))\nprint('body         :', resp.read().decode())\nconn.close()\nhttpd.shutdown()\nt.join(timeout=5)"
+    },
+    {
+      "type": "md",
+      "source": "## 839 · Cursor pagination\n\nThe response returns an opaque cursor marking the last item; the next request continues after it — stable under inserts, indexed lookup.\n\n*A steel bookmark clipped to the exact sentence, not the page number: strangers can staple in new pages all night, your clip still points at your sentence.*\n\n**Watch for:** the exact same mutation — a row inserted between page 1 and page 2 — hits both strategies. Predict which ids page 2 contains under OFFSET, then under a last-seen-id cursor."
+    },
+    {
+      "type": "code",
+      "source": "# OFFSET pagination while the table mutates under you\nitems = [{'id': i} for i in range(1, 7)]        # ids 1..6, newest-first feed\n\npage1 = items[0:3]                              # OFFSET 0 LIMIT 3\nitems.insert(0, {'id': 0})                      # someone prepends a new row NOW\npage2 = items[3:6]                              # OFFSET 3 LIMIT 3\n\nprint('offset page 1:', [it['id'] for it in page1])\nprint('   << insert of id 0 happens between the two requests >>')\nprint('offset page 2:', [it['id'] for it in page2])\nprint('id 3 appears on BOTH pages — the insert shifted every offset by one')"
+    },
+    {
+      "type": "code",
+      "source": "# Cursor pagination over the SAME mutation\nitems = [{'id': i} for i in range(1, 7)]\n\npage1 = [it for it in items if it['id'] > 0][:3]   # cursor starts before everything\ncursor = page1[-1]['id']                           # bookmark = last-seen id\nitems.insert(0, {'id': 0})                         # same insert, same moment\npage2 = [it for it in items if it['id'] > cursor][:3]\n\nprint('cursor page 1:', [it['id'] for it in page1], ' -> next_cursor =', cursor)\nprint('   << insert of id 0 happens between the two requests >>')\nprint('cursor page 2:', [it['id'] for it in page2])\nprint('no duplicate, no skip — the cursor points at DATA, not at a position')"
+    },
+    {
+      "type": "md",
+      "source": "## 843 · JWT anatomy\n\nA JWT is three base64url parts — header.payload.signature — with claims in the payload: readable by anyone, forgeable by no one.\n\n*A see-through glass ticket with claims etched inside and a wax seal on the corner: anyone can read it through the glass, but only the mint's seal makes it valid.*\n\n**Watch for:** the payload decodes with zero secrets — base64 is encoding, not encryption — yet flipping a single character breaks the HMAC seal. Never put passwords in claims."
+    },
+    {
+      "type": "code",
+      "source": "import base64\nimport hashlib\nimport hmac\nimport json\n\ndef b64url(data):\n    return base64.urlsafe_b64encode(data).rstrip(b'=').decode()\n\ndef sign(header_b64, payload_b64, secret):\n    msg = f'{header_b64}.{payload_b64}'.encode()\n    return b64url(hmac.new(secret, msg, hashlib.sha256).digest())\n\nsecret = b'server-side-secret'\nheader = b64url(json.dumps({'alg': 'HS256', 'typ': 'JWT'}, separators=(',', ':')).encode())\npayload = b64url(json.dumps({'sub': '7', 'role': 'admin'}, separators=(',', ':')).encode())\ntoken = f'{header}.{payload}.{sign(header, payload, secret)}'\nprint('token:', token)\n\n# Anyone can READ the payload — no secret required\nh, p, s = token.split('.')\nclaims = base64.urlsafe_b64decode(p + '=' * (-len(p) % 4))\nprint('payload decoded WITHOUT the secret:', claims.decode())"
+    },
+    {
+      "type": "code",
+      "source": "def verify(tok, secret):\n    h, p, s = tok.split('.')\n    return hmac.compare_digest(sign(h, p, secret), s)\n\nprint('1) genuine token verifies :', verify(token, secret))\n\n# Tamper with ONE character of the payload part\nh, p, s = token.split('.')\ntampered_p = p[:-1] + ('A' if p[-1] != 'A' else 'B')\ntampered = f'{h}.{tampered_p}.{s}'\nprint('2) tampered token verifies:', verify(tampered, secret))\nprint('readable by anyone, forgeable by no one — signed, not secret')"
+    },
+    {
+      "type": "md",
+      "source": "## 853 · Lamport logical clocks\n\nA counter incremented per event and maxed on message receipt orders events consistently with causality — happens-before without wall clocks.\n\n*Gossiping villagers each carrying a click-counter: on hearing news you click past the teller's count — nobody owns a watch, yet the stories still sort.*\n\n**Watch for:** clocks jump on receive: max(local, message)+1. Timestamps grow along every causal chain — but the converse fails: a smaller timestamp does NOT mean it happened before. It is a partial order."
+    },
+    {
+      "type": "code",
+      "source": "clocks = {'A': 0, 'B': 0, 'C': 0}\ntrace = {'A': [], 'B': [], 'C': []}\n\ndef local(p, label):                       # local events (and sends) tick +1\n    clocks[p] += 1\n    trace[p].append(f'{label}@{clocks[p]}')\n    return clocks[p]\n\ndef recv(p, msg_ts, label):                # receives jump past the sender\n    clocks[p] = max(clocks[p], msg_ts) + 1\n    trace[p].append(f'{label}@{clocks[p]}')\n    return clocks[p]\n\nlocal('A', 'a1')                 # A works alone\nm1 = local('A', 'send m1')       # sending is an event; m1 carries A's clock (2)\nlocal('B', 'b1')                 # B works alone\nlocal('C', 'c1')                 # C works alone\nrecv('B', m1, 'recv m1')         # B: max(1, 2) + 1 = 3  <- the jump\nm2 = local('B', 'send m2')       # m2 carries 4\nrecv('C', m2, 'recv m2')         # C: max(1, 4) + 1 = 5\n\nlocal('A', 'a2')                 # A again, no news heard: just 3\n\nfor p in 'ABC':\n    print(p, 'trace:', '  ->  '.join(trace[p]))\nprint()\nprint('causal chain a1@1 -> send m1@2 -> recv m1@3 -> send m2@4 -> recv m2@5:')\nprint('  happens-before always means a smaller clock')\nprint('concurrent pair: c1@1 (on C) and a2@3 (on A) share no message path,')\nprint('  so L(c1) < L(a2) does NOT imply c1 happened first — the order is partial')"
+    },
+    {
+      "type": "md",
+      "source": "## 864 · Quorums (W+R>N)\n\nWith N replicas, writes acked by W and reads querying R overlap when W+R>N, so every read touches at least one up-to-date copy.\n\n*Nine safety-deposit boxes: you drop the updated deed into five (W=5) and later open any five (R=5) — pigeonhole gods guarantee one box in your handful holds the newest deed.*\n\n**Watch for:** with N=3, W=1/R=1 gives 1+1 ≤ 3 — some reads land on a replica the write never touched. W=2/R=2 gives 2+2 > 3 — the read set and write set MUST share a replica, so the max-version answer is always the latest."
+    },
+    {
+      "type": "code",
+      "source": "import random\n\ndef fresh_replicas():\n    return [{'value': 'v1', 'version': 1} for _ in range(3)]   # N = 3\n\ndef write(replicas, value, version, W, rng):\n    targets = sorted(rng.sample(range(3), W))\n    for i in targets:\n        replicas[i] = {'value': value, 'version': version}\n    return targets\n\ndef read(replicas, R, rng):\n    targets = sorted(rng.sample(range(3), R))\n    newest = max((replicas[i] for i in targets), key=lambda r: r['version'])\n    return targets, newest\n\n# Scenario 1: W=1, R=1  (1 + 1 <= 3: no overlap guaranteed)\nrng = random.Random(7)   # seeded so this run demonstrates staleness\nreplicas = fresh_replicas()\nw = write(replicas, 'v2', 2, W=1, rng=rng)\nprint('W=1: wrote v2 only to replica', w)\nfor _ in range(3):\n    targets, got = read(replicas, R=1, rng=rng)\n    tag = 'STALE!' if got['version'] < 2 else 'latest'\n    print('  R=1 read from replica', targets, '->', got['value'], '(' + tag + ')')"
+    },
+    {
+      "type": "code",
+      "source": "# Scenario 2: W=2, R=2  (2 + 2 > 3: read and write sets MUST overlap)\nrng = random.Random(7)   # same seed, same luck — overlap saves us anyway\nreplicas = fresh_replicas()\nw = write(replicas, 'v2', 2, W=2, rng=rng)\nprint('W=2: wrote v2 to replicas', w)\nfor _ in range(3):\n    targets, got = read(replicas, R=2, rng=rng)\n    print('  R=2 read from replicas', targets, '->', got['value'], '(always latest)')\nprint('W + R = 4 > N = 3: every read set shares a replica with the write set')"
+    },
+    {
+      "type": "md",
+      "source": "## 872 · Exponential backoff + jitter\n\nWait 1s, 2s, 4s... between retries and add randomness so a thousand failed clients don't re-stampede the recovering server in sync.\n\n*After a fire alarm, the whole office counting 'ten... nine...' in unison would jam the door again — so each person rolls dice for when to walk back in.*\n\n**Watch for:** the window doubles every attempt; the actual delay is a random draw inside it (\"full jitter\", per the AWS architecture blog). The retry loop prints the would-be delays but sleeps only 0.01s so the cell stays fast."
+    },
+    {
+      "type": "code",
+      "source": "import random\n\nrandom.seed(42)\nbase, cap = 0.1, 5.0\n\nprint('attempt | window (doubles)   | drawn delay (full jitter)')\nfor attempt in range(6):\n    window = min(cap, base * 2 ** attempt)\n    delay = random.uniform(0, window)\n    print(f'   {attempt}    | 0 .. {window:5.1f} s        | {delay:.3f} s')\nprint('windows: 0.1, 0.2, 0.4, 0.8, ... — delays scatter inside them')"
+    },
+    {
+      "type": "code",
+      "source": "import time\n\ncalls = {'n': 0}\ndef flaky_op():\n    calls['n'] += 1\n    if calls['n'] < 3:                       # fails twice, then succeeds\n        raise ConnectionError(f'boom #{calls[\"n\"]}')\n    return 'OK'\n\nrandom.seed(42)\nattempt = 0\nwhile True:\n    try:\n        print(f'attempt {attempt + 1}: ->', flaky_op())\n        break\n    except ConnectionError as e:\n        window = min(cap, base * 2 ** attempt)\n        delay = random.uniform(0, window)\n        print(f'attempt {attempt + 1}: {e}; would back off {delay:.3f} s (demo sleeps 0.01 s)')\n        time.sleep(0.01)                     # capped so the cell never drags\n        attempt += 1"
+    },
+    {
+      "type": "md",
+      "source": "## 883 · Load-balancing algorithms\n\nRound robin rotates evenly; least-connections favors the idlest backend; consistent hashing pins a key to a server for cache affinity.\n\n*Three casino dealers: one deals strictly clockwise (round robin), one always serves the emptiest table (least-conn), one seats each regular at 'their' table forever (hash).*\n\n**Watch for:** the job costs are lumpy on a rhythm that round robin's rotation happens to match, so every heavy job lands on the same server. Predict both per-server totals before running — the spread tells the story."
+    },
+    {
+      "type": "code",
+      "source": "jobs = [7, 1, 1, 8, 1, 1, 9, 1, 1, 6]   # 10 jobs, wildly uneven cost\n\n# Round robin: deal strictly clockwise, blind to load\nrr = [0, 0, 0]\nfor i, cost in enumerate(jobs):\n    rr[i % 3] += cost\n\n# Least-connections: always hand the job to the currently least-loaded server\nlc = [0, 0, 0]\nfor cost in jobs:\n    lc[lc.index(min(lc))] += cost\n\nprint('job costs         :', jobs)\nprint('round robin load  :', rr, ' spread =', max(rr) - min(rr))\nprint('least-conn load   :', lc, ' spread =', max(lc) - min(lc))\nprint('RR marched in step with the heavy jobs; least-conn absorbed them')"
+    },
+    {
+      "type": "md",
+      "source": "## 894 · At-least-once delivery\n\nAck only after processing; failures cause redelivery, so nothing is lost but duplicates arrive — consumers must be idempotent.\n\n*A nagging courier who redelivers the parcel every day until you sign: miss his visit and tomorrow brings the same box — sometimes two, so check your shelf before unboxing.*\n\n**Watch for:** the broker delivers the same 'charge $10' message twice because the first ack got lost. Predict both final balances: the naive consumer's and the idempotency-key consumer's."
+    },
+    {
+      "type": "code",
+      "source": "message = {'id': 'msg-001', 'op': 'charge', 'amount': 10}\ndeliveries = [message, message]      # ack was lost -> broker redelivers\n\n# Naive consumer: processes every delivery it sees\nbalance = 0\nfor msg in deliveries:\n    balance -= msg['amount']\nprint('naive consumer balance     :', balance, ' <- charged twice!')\n\n# Idempotent consumer: dedup on the idempotency key before acting\nbalance = 0\nseen = set()\nfor msg in deliveries:\n    if msg['id'] in seen:\n        print('duplicate', msg['id'], 'ignored')\n        continue\n    seen.add(msg['id'])\n    balance -= msg['amount']\nprint('idempotent consumer balance:', balance)\nprint('at-least-once + idempotency = effectively-once')"
+    }
+  ]
+}
