@@ -45,6 +45,33 @@ the hexagon) · **7** data & persistence (seven normal forms) · **8** networkin
 Code **000** = "Value", code **999** = "Blameless postmortem". The full 10×10 category grid is
 in the workbook's `taxonomy` tab.
 
+### How an anchor fuses the address with its concept
+
+The two halves carry different information, and mixing them up is the main source of
+confusion: **the digits are decoded by the taxonomy, never by the anchor.** Read a code left
+to right — hundreds digit → domain (via its digit mnemonic), tens digit → category (the
+domain's shelf, ordered fundamentals → advanced), units digit → rank on that shelf (0 = most
+fundamental). That walk alone lands you on the right shelf. The **anchor encodes only the
+concept** — its mechanism or its name — as one vivid scene. Fusion happens when you *place
+that scene at the address*: stage the anchor inside the domain's mnemonic setting, or
+(stronger, both directions) merge it with your existing French Millenium peg image for that
+exact number — peg(number) × anchor(concept) = one compound image that answers both
+"what lives at 520?" and "where does mutex live?". Three worked examples:
+
+- **520 Mutex** — address walk: 5 = the dining-philosophers table (concurrency), category
+  x2 = the locks shelf, units 0 = the most fundamental lock. Anchor (concept only): *a
+  restroom key chained to your own belt loop — only you can hang it back* (= ownership, the
+  thing that makes a mutex a mutex). Fuse: the philosophers' restroom key.
+- **253 Memoization** — 2 = algorithms (compare two, split in two), x5 = the dynamic-programming
+  shelf, rank 3. Anchor puns the NAME: *a student tapes a MEMO to the fridge and skips the
+  math at the next midnight craving* — "memo" gives you the word back, the lazy fridge gives
+  you the mechanism.
+- **999 Blameless postmortem** — 9 = five nines (never failing), x9 = observability & ops,
+  rank 9: the very last slot of the matrix. Its anchor fuses on its own: *surgeons dissect
+  the fallen server's organs, never the intern's hands — five nines end not in punishment but
+  in learning*. The address ("the end of everything") and the concept ("what you do at the
+  end") reinforce each other.
+
 Recall routes it trains, both directions:
 - code → domain/category digits → concept (and concept → its address);
 - anchor scene bridges the two — and you can **fuse it with your existing French Millenium peg**
