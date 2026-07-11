@@ -1,0 +1,105 @@
+{
+  "notebook": "700_data_persistence",
+  "cells": [
+    {
+      "type": "md",
+      "source": "# 700 · Data & persistence — procedural layer\n\n**Mnemonic:** SEVEN normal forms to tame your tables.\n\n**Codes:** 703, 716, 720, 730, 741, 757, 761, 773, 780, 792.\n\n**Method:** for every code cell — read it, PREDICT the exact output, run it, compare. A wrong prediction is the lesson: reread until you can predict it cold. Run cells top to bottom in ONE kernel — the sqlite connection created in 703 is reused all the way down. Only the two cells marked `# INTENDED ERROR — read the traceback` are supposed to raise."
+    },
+    {
+      "type": "md",
+      "source": "## 703 · SELECT FROM WHERE\n\nCore query shape: FROM picks tables, WHERE filters rows, SELECT projects columns — logically evaluated in that order.\n\n*A fishmonger works right to left: nets the whole lake (FROM), throws back the small fish (WHERE), then fillets only the cuts you ordered (SELECT).*\n\n**Watch for:** written order vs logical order — you type SELECT first, but the engine runs FROM, then WHERE, then SELECT. Predict which of the 4 rows survive the WHERE, and which columns each printed tuple contains."
+    },
+    {
+      "type": "code",
+      "source": "import sqlite3\n\nconn = sqlite3.connect(\":memory:\")   # ONE connection, reused by every sqlite cell below\nconn.isolation_level = None          # autocommit; we will issue BEGIN/COMMIT by hand in 730\ncur = conn.cursor()\n\ncur.execute(\"CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER)\")\ncur.executemany(\"INSERT INTO users VALUES (?, ?, ?)\", [\n    (1, \"ada\", 36),\n    (2, \"grace\", 45),\n    (3, \"linus\", 29),\n    (4, \"edsger\", 51),\n])\n\n# logical order: FROM users -> WHERE age >= 35 -> SELECT name, age\nfor row in cur.execute(\"SELECT name, age FROM users WHERE age >= 35\"):\n    print(row)"
+    },
+    {
+      "type": "md",
+      "source": "## 716 · EXPLAIN query plan\n\nShows the optimizer's chosen plan — scans, join order and algorithms, row estimates; the ANALYZE variant executes and adds real numbers.\n\n*X-ray glasses for your query: put them on and its skeleton appears — a fat Seq Scan femur right where you swore an index lived.*\n\n**Watch for:** EXPLAIN vs EXPLAIN ANALYZE — plain EXPLAIN only estimates; ANALYZE really runs the query. In SQLite the tell is one word: `SCAN` (read every row) vs `SEARCH ... USING INDEX` (jump straight there). Predict both plan lines before running."
+    },
+    {
+      "type": "code",
+      "source": "cur.execute(\"CREATE TABLE events (id INTEGER PRIMARY KEY, city TEXT, amount INTEGER)\")\ncities = [\"lisbon\", \"porto\", \"braga\", \"faro\"]\ncur.executemany(\"INSERT INTO events VALUES (?, ?, ?)\",\n                ((i, cities[i % 4], i * 3) for i in range(5000)))\n\nquery = \"SELECT COUNT(*), SUM(amount) FROM events WHERE city = 'porto'\"\n\nplan_before = cur.execute(\"EXPLAIN QUERY PLAN \" + query).fetchone()[3]\ncur.execute(\"CREATE INDEX idx_events_city ON events(city)\")\nplan_after = cur.execute(\"EXPLAIN QUERY PLAN \" + query).fetchone()[3]\n\nprint(\"before index:\", plan_before)   # SCAN = touch all 5000 rows\nprint(\"after  index:\", plan_after)    # SEARCH ... USING INDEX = only the matches\nprint(\"rows matched, total amount:\", cur.execute(query).fetchone())"
+    },
+    {
+      "type": "md",
+      "source": "## 720 · Normalization\n\nStructuring tables so every fact is stored exactly once, removing redundancy by decomposing along functional dependencies.\n\n*Marie Kondo for data: every fact gets exactly one drawer; a duplicated fact sparks no joy and is folded away into its own table, leaving a key behind as the receipt.*\n\n**Watch for:** denormalization is the deliberate reverse — reintroducing duplication for read speed once you know the cost. First cell shows the cost: the same fact stored 3 times can disagree with itself (update anomaly). Second cell: normalized, one UPDATE fixes every order. Predict ana's city per order in both cells."
+    },
+    {
+      "type": "code",
+      "source": "# denormalized: customer_city is repeated on every order row\ncur.execute(\"CREATE TABLE orders_denorm (order_id INTEGER PRIMARY KEY,\"\n            \" customer TEXT, customer_city TEXT, amount INTEGER)\")\ncur.executemany(\"INSERT INTO orders_denorm VALUES (?, ?, ?, ?)\", [\n    (101, \"ana\",   \"lisbon\", 30),\n    (102, \"ana\",   \"lisbon\", 50),\n    (103, \"ana\",   \"lisbon\", 20),\n    (104, \"bruno\", \"porto\",  40),\n])\n\n# ana moves to porto, but a buggy UPDATE misses order 103...\ncur.execute(\"UPDATE orders_denorm SET customer_city = 'porto'\"\n            \" WHERE customer = 'ana' AND order_id < 103\")\n\nprint(\"ana's city according to each of her order rows:\")\nfor row in cur.execute(\"SELECT order_id, customer_city FROM orders_denorm\"\n                       \" WHERE customer = 'ana' ORDER BY order_id\"):\n    print(\" \", row)\ncities = cur.execute(\"SELECT DISTINCT customer_city FROM orders_denorm\"\n                     \" WHERE customer = 'ana'\").fetchall()\nprint(\"distinct answers to 'where does ana live?':\", [c[0] for c in cities])\n# the database now holds two contradictory versions of one fact: an UPDATE anomaly"
+    },
+    {
+      "type": "code",
+      "source": "# normalized: the city fact lives in exactly ONE row of customers\ncur.execute(\"CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT, city TEXT)\")\ncur.execute(\"CREATE TABLE orders_norm (order_id INTEGER PRIMARY KEY,\"\n            \" customer_id INTEGER, amount INTEGER)\")\ncur.executemany(\"INSERT INTO customers VALUES (?, ?, ?)\",\n                [(1, \"ana\", \"lisbon\"), (2, \"bruno\", \"porto\")])\ncur.executemany(\"INSERT INTO orders_norm VALUES (?, ?, ?)\",\n                [(101, 1, 30), (102, 1, 50), (103, 1, 20), (104, 2, 40)])\n\ncur.execute(\"UPDATE customers SET city = 'porto' WHERE name = 'ana'\")  # ONE row changed\n\nprint(\"ana's city according to each of her orders (via JOIN):\")\nfor row in cur.execute(\"SELECT o.order_id, c.city FROM orders_norm o\"\n                       \" JOIN customers c ON c.id = o.customer_id\"\n                       \" WHERE c.name = 'ana' ORDER BY o.order_id\"):\n    print(\" \", row)\n# one UPDATE, zero anomalies: every order agrees, because the fact exists once"
+    },
+    {
+      "type": "md",
+      "source": "## 730 · Transaction\n\nA group of statements executed as one all-or-nothing unit: COMMIT makes all of it visible; ROLLBACK erases every trace.\n\n*A magician's tablecloth yank: either the whole new table setting appears in one motion, or the trick fails and every plate is exactly where it was. The audience never sees half-moved cutlery.*\n\n**Watch for:** single autocommit statement vs transaction — each statement is already its own tiny transaction; BEGIN binds several into one fate. Predict all four printed counts, especially the count AFTER two successful inserts but a ROLLBACK."
+    },
+    {
+      "type": "code",
+      "source": "cur.execute(\"CREATE TABLE accounts (id INTEGER PRIMARY KEY, name TEXT)\")\n\ndef n_accounts():\n    return cur.execute(\"SELECT COUNT(*) FROM accounts\").fetchone()[0]\n\nprint(\"count at start          :\", n_accounts())\n\ncur.execute(\"BEGIN\")\ncur.execute(\"INSERT INTO accounts VALUES (1, 'alice')\")\ncur.execute(\"INSERT INTO accounts VALUES (2, 'bob')\")\nprint(\"count inside transaction:\", n_accounts())\ntry:\n    cur.execute(\"INSERT INTO accounts VALUES (1, 'mallory')\")  # id 1 again -> error\nexcept sqlite3.IntegrityError as err:\n    print(\"error mid-transaction   :\", err)\n    cur.execute(\"ROLLBACK\")            # all-or-nothing: alice and bob vanish too\nprint(\"count after ROLLBACK    :\", n_accounts())\n\ncur.execute(\"BEGIN\")\ncur.execute(\"INSERT INTO accounts VALUES (1, 'alice')\")\ncur.execute(\"INSERT INTO accounts VALUES (2, 'bob')\")\ncur.execute(\"COMMIT\")                  # the tablecloth trick lands: both appear at once\nprint(\"count after COMMIT      :\", n_accounts())"
+    },
+    {
+      "type": "md",
+      "source": "## 741 · Key-value store\n\nStores an opaque value under a unique key; you can GET, SET, and DELETE by exact key but never query inside the value.\n\n*A wall of gym lockers: present exactly key #417 and get your bag. Ask the attendant 'which lockers contain red jackets?' and he just stares — lockers are opaque; only keys open anything.*\n\n**Watch for:** document store vs KV — documents are queryable and indexable by inner fields; a KV value is a sealed blob. Predict what `get` returns after the `delete`. Redis and DynamoDB are this exact idea, industrialized."
+    },
+    {
+      "type": "code",
+      "source": "import json\n\nclass KVStore:\n    # toy key-value store: opaque JSON blobs filed under exact keys\n    def __init__(self):\n        self._data = {}\n    def put(self, key, value):\n        self._data[key] = json.dumps(value)   # value goes in as a sealed text blob\n    def get(self, key):\n        raw = self._data.get(key)\n        return None if raw is None else json.loads(raw)\n    def delete(self, key):\n        return self._data.pop(key, None) is not None\n\nkv = KVStore()\nkv.put(\"session:abc\", {\"user\": 7, \"ttl\": 3600})\nkv.put(\"session:xyz\", {\"user\": 9})\nprint(\"get    session:abc ->\", kv.get(\"session:abc\"))\nprint(\"delete session:xyz ->\", kv.delete(\"session:xyz\"))\nprint(\"get    session:xyz ->\", kv.get(\"session:xyz\"))\nprint(\"keys left:\", sorted(kv._data))\n# no WHERE, no query-by-value: 'which sessions belong to user 7?' is unanswerable\n# without scanning every locker. Redis / DynamoDB = this idea, industrialized."
+    },
+    {
+      "type": "md",
+      "source": "## 757 · LRU and LFU eviction\n\nWhen full, the cache evicts by recency (LRU: least recently used) or by frequency (LFU: least frequently used) to make room.\n\n*A stuffed closet: LRU tosses whatever you wore longest ago; LFU counts wears and tosses the least-worn. The tux worn once last night survives LRU's purge but is first out under LFU.*\n\n**Watch for:** TTL removes entries because they are old; eviction removes them because the cache is full. With maxsize=2 and the call pattern a, b, a, c, b — predict exactly which calls print `computing` (miss) and the final hits/misses/currsize."
+    },
+    {
+      "type": "code",
+      "source": "import functools\n\n@functools.lru_cache(maxsize=2)\ndef load(key):\n    print(f\"   computing {key!r} (cache miss)\")\n    return key.upper()\n\nfor key in [\"a\", \"b\", \"a\", \"c\", \"b\"]:\n    print(f\"load({key!r}) -> {load(key)}\")\n\ninfo = load.cache_info()\nprint(info)\nprint(\"evictions so far:\", info.misses - info.currsize)\n# trace: a miss, b miss, a HIT (a becomes most-recent), c miss -> evicts b (LRU),\n# b miss again -> evicts a. Recency, not alphabet, decides who gets tossed."
+    },
+    {
+      "type": "md",
+      "source": "## 761 · JSON\n\nUbiquitous text format of objects, arrays, strings, numbers, booleans, null — human-readable and schema-free; no comments, dates, or safe ints past 2^53.\n\n*Jason, the friendly courier every country understands: travels light, speaks plainly, checks no ID (schema). But he can't pronounce dates — he hands them over scribbled as strings — and drops any coin bigger than 2^53.*\n\n**Watch for:** JSON vs JavaScript object literal — JSON is stricter: double-quoted keys, no comments, no trailing commas. Cell 1: predict the serialized text (what happens to True and None?). Cell 2 raises on purpose — Jason cannot pronounce dates. Cell 3 is the standard fix."
+    },
+    {
+      "type": "code",
+      "source": "import json\n\ndoc = {\"id\": 7, \"tags\": [\"a\", \"b\"], \"meta\": {\"ok\": True, \"score\": None}}\n\ntext = json.dumps(doc)     # python -> JSON text\nback = json.loads(text)    # JSON text -> python\n\nprint(\"serialized :\", text)\nprint(\"round-trip equal:\", back == doc)\n# note in the text: True became true, None became null, keys grew double quotes"
+    },
+    {
+      "type": "code",
+      "source": "# INTENDED ERROR — read the traceback\nimport json\nfrom datetime import datetime\n\njson.dumps({\"when\": datetime.now()})   # JSON has no date type -> TypeError"
+    },
+    {
+      "type": "code",
+      "source": "from datetime import datetime\n\nstamp = datetime(2026, 7, 11, 9, 30, 0)          # fixed value, deterministic output\ntext = json.dumps({\"when\": stamp.isoformat()})   # the fix: dates travel as ISO-8601 strings\nprint(\"serialized:\", text)\nprint(\"and back  :\", json.loads(text)[\"when\"], \"<- comes back as a plain string, by convention\")"
+    },
+    {
+      "type": "md",
+      "source": "## 773 · Write-ahead log\n\nEvery change is appended and fsynced to a sequential log before data pages are touched; replaying the log after a crash restores committed work.\n\n*The captain's iron rule: write the maneuver in the logbook before touching the sails. When the storm (crash) hits mid-turn, the surviving mate replays the logbook line by line and the ship ends exactly where the entries promised.*\n\n**Watch for:** WAL vs audit trail — the WAL is physical, engine-internal, recycled after checkpoints; an audit trail is business-level and kept for humans. Predict the pre-crash state after the 5 ops (note the DEL), then confirm replay rebuilds it exactly."
+    },
+    {
+      "type": "code",
+      "source": "log = []      # the write-ahead log: append-only, always written FIRST\nstate = {}    # the 'data pages': fast, but lost in a crash\n\ndef apply_op(target, op):\n    kind, key, *rest = op.split()\n    if kind == \"SET\":\n        target[key] = int(rest[0])\n    elif kind == \"DEL\":\n        target.pop(key, None)\n\nfor op in [\"SET x 1\", \"SET y 2\", \"SET x 5\", \"DEL y\", \"SET z 9\"]:\n    log.append(op)        # 1) logbook first (a real engine fsyncs here)\n    apply_op(state, op)   # 2) only then touch the sails\n\nprint(\"state before crash:\", state)\npre_crash = dict(state)\n\nstate = None              # CRASH — in-memory data pages are gone\nrecovered = {}\nfor op in log:            # recovery = replay the log, in order, from the start\n    apply_op(recovered, op)\n\nprint(\"recovered from log:\", recovered)\nprint(\"recovered == pre-crash:\", recovered == pre_crash)"
+    },
+    {
+      "type": "md",
+      "source": "## 780 · OLTP vs OLAP\n\nOLTP: many tiny concurrent reads/writes touching single rows (row stores). OLAP: few huge scans aggregating millions of rows (column stores).\n\n*Downstairs, checkout lanes beep thousands of tiny basket updates a minute (OLTP). Upstairs at midnight, one accountant reads EVERY receipt of the year to ask how bananas did (OLAP). Different rooms, different filing.*\n\n**Watch for:** HTAP hybrids try both in one system; the classic split is row store for OLTP, columnar warehouse for OLAP. Same 50,000 records, two layouts — predict which layout sums one column faster, then check the ratio. Exact times vary per machine; the winner does not."
+    },
+    {
+      "type": "code",
+      "source": "import timeit\n\nN = 50_000\nrows = [(i, i % 7, i * 2) for i in range(N)]      # row layout: one tuple per record\ncols = {                                          # column layout: one list per field\n    \"id\":       list(range(N)),\n    \"category\": [i % 7 for i in range(N)],\n    \"value\":    [i * 2 for i in range(N)],\n}\n\nt_rows = timeit.timeit(lambda: sum(r[2] for r in rows), number=20)\nt_cols = timeit.timeit(lambda: sum(cols[\"value\"]),      number=20)\n\nprint(f\"sum 'value' via rows    : {t_rows:.4f} s  (20 scans)\")\nprint(f\"sum 'value' via columns : {t_cols:.4f} s  (20 scans)\")\nprint(f\"columnar scan wins by ~{t_rows / t_cols:.0f}x\")\n# the accountant wants ONE column of every receipt: a contiguous list beats\n# hopping through 50,000 tuples. That is why warehouses store by column."
+    },
+    {
+      "type": "md",
+      "source": "## 792 · UNIQUE constraint\n\nGuarantees no two rows share the same value(s) in the constrained column(s), enforced by a unique index; NULLs typically don't count as duplicates.\n\n*The marathon official at the start line scans bib numbers against a sorted roster (unique index): a second runner in bib 1042 is yanked off the course before the gun — no two racers ever share a number mid-race.*\n\n**Watch for:** primary key vs UNIQUE — a PK is UNIQUE plus NOT NULL and one per table; UNIQUE constraints can be many and usually admit NULLs. Cell 1 inserts cleanly. Cell 2 raises on purpose — predict the exact exception type before running."
+    },
+    {
+      "type": "code",
+      "source": "cur.execute(\"CREATE TABLE signups (id INTEGER PRIMARY KEY, email TEXT, UNIQUE(email))\")\ncur.execute(\"INSERT INTO signups VALUES (1, 'ada@example.com')\")\nprint(\"first insert OK:\", cur.execute(\"SELECT * FROM signups\").fetchall())"
+    },
+    {
+      "type": "code",
+      "source": "# INTENDED ERROR — read the traceback\ncur.execute(\"INSERT INTO signups VALUES (2, 'ada@example.com')\")  # same email, different id\n# the id is new, but the UNIQUE(email) roster already has this bib number"
+    }
+  ]
+}

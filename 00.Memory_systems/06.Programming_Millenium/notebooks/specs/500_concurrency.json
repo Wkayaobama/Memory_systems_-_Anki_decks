@@ -1,0 +1,97 @@
+{
+  "notebook": "500_concurrency",
+  "cells": [
+    {
+      "type": "md",
+      "source": "# 500 · Concurrency & parallelism — procedural layer\n\n**Mnemonic — FIVE dining philosophers around the table:** five forks, five thinkers, and every classic failure of shared state at one dinner.\n\nCodes in this notebook: **500, 514, 520, 532, 541, 551, 565, 570, 584, 599**\n\n**Method:** for every code cell — read it, **PREDICT** the exact output (values *and* order and rough timings), run it, **COMPARE**. A wrong prediction is the lesson: reread until the output feels inevitable. Run cells top to bottom in a single kernel.\n\nNo cell in this notebook is supposed to raise, and nothing here can hang: every `join`, `acquire`, and `wait` carries a timeout, demos are stdlib-only, and randomness is seeded (`random.seed(42)`) so misses and retries are reproducible."
+    },
+    {
+      "type": "md",
+      "source": "## 500 · Concurrency vs parallelism\n\nConcurrency structures a program to handle many tasks at once; parallelism actually executes tasks simultaneously on multiple cores.\n\n*One barista juggling five orders by switching between them, versus five baristas each pulling an espresso shot at the same instant.*\n\n**Watch:** four 0.2s tasks back to back vs overlapped in threads. Predict both elapsed times — then ask whether the threaded version would still win if the tasks were pure computation instead of sleeps."
+    },
+    {
+      "type": "code",
+      "source": "import time, threading\n\ndef order(i):\n    time.sleep(0.2)          # stands in for I/O: network call, disk read...\n\nt0 = time.perf_counter()\nfor i in range(4):           # one barista, orders back to back\n    order(i)\nsequential = time.perf_counter() - t0\n\nt0 = time.perf_counter()\nthreads = [threading.Thread(target=order, args=(i,), daemon=True) for i in range(4)]\nfor t in threads:\n    t.start()                # all four sleeps overlap\nfor t in threads:\n    t.join(timeout=5)\nthreaded = time.perf_counter() - t0\n\nprint(f\"sequential: {sequential:.2f}s   (4 x 0.2s, one after another)\")\nprint(f\"threaded:   {threaded:.2f}s   (4 x 0.2s, overlapping)\")\nprint(\"note: sleep releases the GIL, so this win is real for I/O-bound work only -\")\nprint(\"for pure CPU work the GIL lets one thread run Python bytecode at a time.\")"
+    },
+    {
+      "type": "md",
+      "source": "## 514 · Non-atomic increment\n\n`x += 1` is really read, add, write — three machine steps another thread can interleave between, silently losing counts.\n\n*Updating a scoreboard by carrying the number card to a back desk, penciling +1, and carrying it back — meanwhile someone swapped the board.*\n\n**Watch:** how far below 10000 the final count lands. The `time.sleep(0)` between read and write forces the OS to interleave the threads *every* iteration, so the lost updates that normally strike \"sometimes, at 3am\" happen right now, on demand."
+    },
+    {
+      "type": "code",
+      "source": "import threading, time\n\ncounter = [0]\nN = 5000\n\ndef worker():\n    for _ in range(N):\n        tmp = counter[0]          # 1. READ the shared value\n        time.sleep(0)             # yield - the other thread sneaks in HERE\n        counter[0] = tmp + 1      # 3. WRITE, clobbering whatever it did\n\nthreads = [threading.Thread(target=worker, daemon=True) for _ in range(2)]\nfor t in threads:\n    t.start()\nfor t in threads:\n    t.join(timeout=5)\n\nprint(f\"expected: {2 * N}\")\nprint(f\"actual:   {counter[0]}\")\nprint(f\"lost updates: {2 * N - counter[0]} increments overwritten mid-flight\")"
+    },
+    {
+      "type": "md",
+      "source": "## 520 · Mutex\n\nA mutual-exclusion lock with an owner: the thread that locks it must be the one to unlock it, admitting one holder at a time.\n\n*A restroom key chained to your own belt loop: you carry it in, and only you can hang it back — nobody else may return your key.*\n\n**Watch:** the identical racy loop from 514 runs twice — bare, then wrapped in a `threading.Lock`. Predict both numbers before running: the `sleep(0)` hazard is still there, but inside the lock nobody can interleave the read-modify-write."
+    },
+    {
+      "type": "code",
+      "source": "import threading, time\n\nN = 5000\n\ndef run(with_lock):\n    counter = [0]\n    lock = threading.Lock()\n    def worker():\n        for _ in range(N):\n            if with_lock and not lock.acquire(timeout=5):\n                return                     # safety valve, never taken here\n            tmp = counter[0]\n            time.sleep(0)                  # same hazard as in 514\n            counter[0] = tmp + 1\n            if with_lock:\n                lock.release()             # only the holder releases its key\n    threads = [threading.Thread(target=worker, daemon=True) for _ in range(2)]\n    for t in threads:\n        t.start()\n    for t in threads:\n        t.join(timeout=5)\n    return counter[0]\n\nracy = run(with_lock=False)\nlocked = run(with_lock=True)\nprint(f\"expected: {2 * N} | racy: {racy} | with mutex: {locked}\")\nprint(\"the mutex makes read-modify-write one indivisible step - exact count, every run\")"
+    },
+    {
+      "type": "md",
+      "source": "## 532 · Lock ordering\n\nImpose a global order on locks and always acquire in ascending order — circular wait becomes structurally impossible.\n\n*Mountaineers who must clip carabiners strictly in the order 1, 2, 3 up the cliff face — no rope can ever loop back into a circle.*\n\n**Watch:** first cell — two philosophers grab opposite forks, then each times out reaching for the other's (`acquire(timeout=0.5)` is the only reason this prints instead of freezing). Second cell — the *same* two threads, but both take A before B: the cycle cannot form."
+    },
+    {
+      "type": "code",
+      "source": "import threading, time\n\nlock_a, lock_b = threading.Lock(), threading.Lock()\ngot = {}\n\ndef philosopher_1():\n    with lock_a:                                   # takes A first\n        time.sleep(0.1)                            # lets the other grab B\n        got[\"t1 wants B\"] = lock_b.acquire(timeout=0.5)\n        if got[\"t1 wants B\"]:\n            lock_b.release()\n\ndef philosopher_2():\n    with lock_b:                                   # takes B first - opposite order!\n        time.sleep(0.1)\n        got[\"t2 wants A\"] = lock_a.acquire(timeout=0.5)\n        if got[\"t2 wants A\"]:\n            lock_a.release()\n\nthreads = [threading.Thread(target=f, daemon=True) for f in (philosopher_1, philosopher_2)]\nfor t in threads:\n    t.start()\nfor t in threads:\n    t.join(timeout=5)\n\nprint(f\"t1 got B: {got.get('t1 wants B')}   t2 got A: {got.get('t2 wants A')}\")\nif not got.get(\"t1 wants B\") and not got.get(\"t2 wants A\"):\n    print(\"potential deadlock detected: each holds one lock and waits on the other (circular wait)\")\n    print(\"without the acquire timeouts, this cell would hang forever\")"
+    },
+    {
+      "type": "code",
+      "source": "import threading, time\n\nlock_a, lock_b = threading.Lock(), threading.Lock()\nlog = []\n\ndef philosopher(name):\n    if lock_a.acquire(timeout=2):                  # EVERYONE reaches for A first...\n        time.sleep(0.05)\n        if lock_b.acquire(timeout=2):              # ...then B - no cycle can form\n            log.append(f\"{name}: got A then B, ate, released both\")\n            lock_b.release()\n        lock_a.release()\n\nthreads = [threading.Thread(target=philosopher, args=(f\"t{i}\",), daemon=True) for i in (1, 2)]\nfor t in threads:\n    t.start()\nfor t in threads:\n    t.join(timeout=5)\n\nfor line in log:\n    print(line)\nprint(\"same locks, same threads - one global acquisition order removes deadlock by construction\")"
+    },
+    {
+      "type": "md",
+      "source": "## 541 · Compare-and-swap (CAS)\n\nA CPU instruction that atomically writes a new value only if the location still holds the expected old value, reporting success or failure.\n\n*A vending machine that swaps in your new bottle only if the slot still shows exactly the barcode you claimed was there — else it spits your coin back.*\n\n**Watch:** the retry count. Each failed CAS means an interloper changed the cell between our read and our write, so we re-read and retry instead of clobbering. Predict the relationship between `final`, our 20 increments, and `retries`."
+    },
+    {
+      "type": "code",
+      "source": "import random\n\nrandom.seed(42)\n\ndef compare_and_swap(cell, expected, new):\n    # pretend this body is ONE atomic CPU instruction (CMPXCHG on x86)\n    if cell[0] == expected:\n        cell[0] = new\n        return True\n    return False\n\ncell = [0]\nretries = 0\n\nfor _ in range(20):                    # we want to add exactly 20\n    while True:\n        old = cell[0]                  # 1. read\n        if random.random() < 0.3:      # simulated contention: an interloper\n            cell[0] = old + 1          #    bumps the cell between our read and write\n        if compare_and_swap(cell, old, old + 1):\n            break                      # 2. our write landed on an unchanged cell\n        retries += 1                   # 3. cell moved under us: loop, re-read, retry\n\nprint(f\"final value:   {cell[0]}\")\nprint(f\"retries taken: {retries}\")\nprint(f\"final == our 20 + interlopers' bumps == 20 + {retries}: {cell[0] == 20 + retries}\")\nprint(\"no lock, no lost update: failure is detected and answered with a retry\")"
+    },
+    {
+      "type": "md",
+      "source": "## 551 · Channel\n\nA typed conduit through which concurrent tasks send and receive values, synchronizing as the data flows.\n\n*A pneumatic bank tube between tellers: capsules whoosh across the ceiling, and the tube itself paces who waits for whom.*\n\n**Watch:** items arrive in send order, and the `None` sentinel plays the role of `close()`. The `maxsize=2` bound is the point — a full tube makes the producer wait, so the channel *synchronizes*, it doesn't just store."
+    },
+    {
+      "type": "code",
+      "source": "import threading, queue\n\nch = queue.Queue(maxsize=2)            # bounded: a full channel paces the producer\n\ndef producer():\n    for capsule in [\"espresso\", \"latte\", \"flat white\", \"mocha\"]:\n        ch.put(capsule, timeout=2)     # blocks (bounded) when the tube is full\n    ch.put(None, timeout=2)            # sentinel: \"channel closed\"\n\nt = threading.Thread(target=producer, daemon=True)\nt.start()\n\nconsumed = []\nwhile True:\n    capsule = ch.get(timeout=2)        # blocks (bounded) when the tube is empty\n    if capsule is None:\n        break\n    consumed.append(capsule)\n\nt.join(timeout=5)\nprint(\"consumed in order:\", consumed)\nprint(\"queue.Queue + sentinel = a channel: data flows one way, synchronization flows both\")"
+    },
+    {
+      "type": "md",
+      "source": "## 565 · Async/await\n\nSyntax that suspends a coroutine at `await` and resumes it when the awaited future resolves — async code shaped like sync code.\n\n*A bookmark dropped mid-sentence when the doorbell rings: the reader handles the door, returns, and resumes on the exact same syllable.*\n\n**Watch:** two 0.3s awaits gathered on a **single thread** finish in ~0.3s, not 0.6s. Then in the second cell, predict the exact print order — both coroutines start before either resumes. (The notebook kernel already runs an event loop, so we use top-level `await`; calling `asyncio.run` here would fail.)"
+    },
+    {
+      "type": "code",
+      "source": "import asyncio, time\n\nt0 = time.perf_counter()\nawait asyncio.gather(asyncio.sleep(0.3), asyncio.sleep(0.3))\nelapsed = time.perf_counter() - t0\nprint(f\"two 0.3s awaits, gathered: {elapsed:.2f}s - overlapped on ONE thread, not 0.6s\")"
+    },
+    {
+      "type": "code",
+      "source": "import asyncio\n\nasync def brew(name, delay):\n    print(f\"{name}: start\")\n    await asyncio.sleep(delay)         # bookmark dropped: the loop runs the other coroutine\n    print(f\"{name}: resume after {delay}s\")\n\nawait asyncio.gather(brew(\"slow\", 0.2), brew(\"fast\", 0.1))\nprint(\"both started before either resumed - await marks exactly where each one paused\")"
+    },
+    {
+      "type": "md",
+      "source": "## 570 · Thread pool\n\nA fixed crew of reusable worker threads pulling tasks from a queue — amortizes thread creation and caps total concurrency.\n\n*A hotel keeps exactly five lifeguards rotating at the pool: swimmers (tasks) queue for attention; nobody hires a fresh lifeguard per swimmer.*\n\n**Watch:** 8 tasks of 0.2s through 4 workers = two waves ≈ 0.4s, versus 1.6s serial. Predict both timings and whether the result lists match."
+    },
+    {
+      "type": "code",
+      "source": "import time\nfrom concurrent.futures import ThreadPoolExecutor\n\ndef swim(i):\n    time.sleep(0.2)                    # each swimmer needs 0.2s of attention\n    return i * i\n\nt0 = time.perf_counter()\nserial = [swim(i) for i in range(8)]\nt_serial = time.perf_counter() - t0\n\nt0 = time.perf_counter()\nwith ThreadPoolExecutor(max_workers=4) as pool:   # exactly 4 lifeguards\n    pooled = list(pool.map(swim, range(8)))       # 8 swimmers queue up\nt_pool = time.perf_counter() - t0\n\nprint(f\"serial, 8 x 0.2s:      {t_serial:.2f}s\")\nprint(f\"pool of 4 workers:     {t_pool:.2f}s   (8 tasks / 4 workers = 2 waves of 0.2s)\")\nprint(\"results identical:\", serial == pooled, \"- map keeps submission order\")"
+    },
+    {
+      "type": "md",
+      "source": "## 584 · Map-reduce pattern\n\nMap a function over records in parallel, then reduce the intermediate results by key into aggregates — with a shuffle in between.\n\n*A national census: thousands of counters tally their own street (map), mail totals to per-state desks (shuffle), which sum them into one book (reduce).*\n\n**Watch:** four independent partial `Counter`s (map) merge key-by-key into one (reduce). Counter addition is associative, so the arrival order of partials cannot change the answer — that indifference is what makes the pattern parallelizable."
+    },
+    {
+      "type": "code",
+      "source": "from collections import Counter\nfrom concurrent.futures import ThreadPoolExecutor\nfrom functools import reduce\n\ntext = (\"the philosophers eat rice while the philosophers think \"\n        \"and the forks wait while the rice cools \") * 4\nwords = text.split()\nchunks = [words[i::4] for i in range(4)]           # split the census into 4 streets\n\ndef map_count(chunk):                              # MAP: each worker tallies its own chunk\n    return Counter(chunk)\n\nwith ThreadPoolExecutor(max_workers=4) as pool:\n    partials = list(pool.map(map_count, chunks))\n\ntotal = reduce(lambda a, b: a + b, partials)       # REDUCE: merge tallies key by key\n\nprint(\"words processed:\", len(words), \"in\", len(partials), \"partial counters\")\nprint(\"top words:\", total.most_common(3))\nprint(\"full counts:\", dict(sorted(total.items())))"
+    },
+    {
+      "type": "md",
+      "source": "## 599 · Never sync by sleeping\n\n`sleep(n)` is a timing guess, not synchronization; wait on the actual condition with joins, events, barriers, or queues.\n\n*Leaving the package on the porch and napping until the courier has 'probably' come — versus a doorbell that rings at the actual pickup.*\n\n**Watch:** the producer takes a seeded ~0.21s. The consumer that naps a fixed 0.1s then reads sees `None` — its guess lost the race. The `Event.wait(timeout=2)` consumer always sees the value: its timeout is a safety bound on a *real condition*, not a guess about timing."
+    },
+    {
+      "type": "code",
+      "source": "import threading, random, time\n\nrandom.seed(42)\ndelay = random.uniform(0.05, 0.3)          # seeded: reproducible, but a guess can't know it\nprint(f\"(this run the courier takes {delay:.3f}s)\")\n\n# BAD - sleep and hope --------------------------------------------------\nporch = {\"package\": None}\ndef courier_bad():\n    time.sleep(delay)\n    porch[\"package\"] = \"delivered\"\n\nt1 = threading.Thread(target=courier_bad, daemon=True)\nt1.start()\ntime.sleep(0.1)                            # 'a tenth of a second is probably enough'\nprint(\"sleep-then-read saw:\", porch[\"package\"], \" <- None: the nap ended before the courier came\")\nt1.join(timeout=5)\n\n# GOOD - wait on the actual condition -----------------------------------\nporch2 = {\"package\": None}\ndoorbell = threading.Event()\ndef courier_good():\n    time.sleep(delay)\n    porch2[\"package\"] = \"delivered\"\n    doorbell.set()                         # ring when it actually happened\n\nt2 = threading.Thread(target=courier_good, daemon=True)\nt2.start()\nrang = doorbell.wait(timeout=2)            # bounded wait on the REAL event\nprint(\"event-wait saw:     \", porch2[\"package\"], f\" (doorbell rang: {rang})\")\nt2.join(timeout=5)\n\nprint(\"sleep guesses at time; the Event waits on the fact - and its timeout is a\")\nprint(\"safety bound for the pathological case, never the synchronization itself\")"
+    }
+  ]
+}
