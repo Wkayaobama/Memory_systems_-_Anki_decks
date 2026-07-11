@@ -1,0 +1,101 @@
+{
+  "notebook": "000_fundamentals",
+  "cells": [
+    {
+      "type": "md",
+      "source": "# 000 · Programming fundamentals — procedural layer\n\n**Domain mnemonic — 0 is the empty origin:** null, zero, the blank slate every program starts from.\n\nCodes covered: **008** implicit type coercion · **018** shadowing · **023** short-circuit evaluation · **037** nesting depth · **046** off-by-one error · **057** text vs bytes · **063** the 0.1 + 0.2 problem · **079** re-raise & exception chaining · **083** with statement (context manager) · **099** aliasing.\n\n**Method:** read the cell → **predict the output** → run it → compare. The matrix holds the imagery; this notebook engraves the net effect. Cells run top to bottom in one kernel. Three cells raise on purpose — their first line says so, and the traceback itself is the output to study."
+    },
+    {
+      "type": "md",
+      "source": "## 008 · Implicit type coercion\n\nCoercion is the language auto-converting a value's type in mixed expressions: `1 + 2.0 -> 3.0`; JS `\"1\" + 1 -> \"11\"`.\n\n*A pushy customs officer at the border between number-land and string-land restamps your passport to the other nationality without asking - you only notice when \"11\" comes out.*\n\nWatch: the result type flips with no call from you — and Python refuses the string+int crossing that JS silently allows."
+    },
+    {
+      "type": "code",
+      "source": "# Mixed expressions: who restamped the passport?\na = 1 + 2.0\nprint(\"1 + 2.0      ->\", repr(a), \"| type:\", type(a).__name__)\nb = True + 1\nprint(\"True + 1     ->\", repr(b), \"| type:\", type(b).__name__, \"(bool coerced to int)\")\ntry:\n    \"1\" + 1\nexcept TypeError as e:\n    print('\"1\" + 1      -> TypeError:', e)\nprint('str(1) + \"1\" ->', repr(str(1) + \"1\"), \"| explicit conversion: you called str(), nothing implicit\")"
+    },
+    {
+      "type": "md",
+      "source": "## 018 · Shadowing\n\nShadowing is an inner-scope variable reusing an outer name, hiding the outer binding until the inner scope ends.\n\n*An eclipse: the small inner moon named x slides in front of the huge outer sun named x. The sun still burns behind it, untouched and invisible, until the moon moves on.*\n\nWatch: inside the function you see the moon; after it returns, the outer sun is still exactly what it was."
+    },
+    {
+      "type": "code",
+      "source": "x = \"outer sun\"\n\ndef eclipse():\n    x = \"inner moon\"  # new binding, not a reassignment of the outer x\n    print(\"inside eclipse(): x =\", repr(x))\n\neclipse()\nprint(\"after eclipse() : x =\", repr(x), \"(outer binding untouched)\")"
+    },
+    {
+      "type": "md",
+      "source": "## 023 · Short-circuit evaluation\n\n`and`/`or` stop evaluating once the outcome is known: `False and f()` never calls `f` - enabling guards like `x != 0 and 1/x`.\n\n*A circuit breaker that trips at the first False: current never reaches the second bulb, so it stays dark and its side effects never fire at all.*\n\nWatch: which bulbs print \"lit\" — after a tripped `and`, the right-hand side never runs, so its side effect never happens."
+    },
+    {
+      "type": "code",
+      "source": "def bulb(label):\n    print(\"  side effect: bulb\", label, \"lit\")\n    return True\n\nprint(\"True and bulb('A') :\")\nresult = True and bulb(\"A\")\nprint(\"  ->\", result)\nprint(\"False and bulb('B'):\")\nresult = False and bulb(\"B\")\nprint(\"  ->\", result, \"(breaker tripped: bulb B never evaluated)\")\n\nx = 0\nsafe = x != 0 and 10 / x > 1\nprint(\"x = 0; x != 0 and 10/x > 1 ->\", safe, \"(division skipped, no ZeroDivisionError)\")"
+    },
+    {
+      "type": "md",
+      "source": "## 037 · Nesting depth\n\nDeeply nested conditionals (the arrow anti-pattern) hide logic; flatten with guard clauses, early returns, or extracted functions.\n\n*Code shaped like an arrowhead of Russian dolls: to reach the else at the tip you pry open five dolls, and by the third you have forgotten what the first one held.*\n\nWatch: both functions print identical results on all 8 inputs — the guard-clause version does it at one indentation level instead of four."
+    },
+    {
+      "type": "code",
+      "source": "def nested(a, b, c):          # the arrowhead\n    if a:\n        if b:\n            if c:\n                return \"do()\"\n            else:\n                return \"stopped: no c\"\n        else:\n            return \"stopped: no b\"\n    else:\n        return \"stopped: no a\"\n\ndef flat(a, b, c):            # guard-clause inversion\n    if not a:\n        return \"stopped: no a\"\n    if not b:\n        return \"stopped: no b\"\n    if not c:\n        return \"stopped: no c\"\n    return \"do()\"\n\ncases = [(a, b, c) for a in (False, True) for b in (False, True) for c in (False, True)]\nfor case in cases:\n    n, f = nested(*case), flat(*case)\n    assert n == f\n    print(case, \"-> nested:\", n, \"| flat:\", f)\nprint(\"identical on all\", len(cases), \"inputs; deepest indent: 4 levels -> 1 level\")"
+    },
+    {
+      "type": "md",
+      "source": "## 046 · Off-by-one error\n\nFencepost errors run a loop once too many or too few by confusing counts with boundaries: 10 posts hold only 9 rails.\n\n*A builder orders 10 rails for his 10 fence posts and stands baffled at the end, one rail dangling from his hand - posts are boundaries; the gaps are the count.*\n\nWatch: the loop survives indexes 0..2, then dies asking for index 3 of a 3-element list — one pass too many."
+    },
+    {
+      "type": "code",
+      "source": "# INTENDED ERROR — read the traceback\nrails = [\"rail-0\", \"rail-1\", \"rail-2\"]\nprint(\"len(rails) =\", len(rails), \"| valid indexes: 0, 1, 2\")\nfor i in range(len(rails) + 1):   # + 1 is the fencepost\n    print(\"index\", i, \"->\", rails[i])"
+    },
+    {
+      "type": "code",
+      "source": "# FIX: range(len(rails)) — the half-open [0, 3): length is a count, not a last index\nrails = [\"rail-0\", \"rail-1\", \"rail-2\"]\nfor i in range(len(rails)):\n    print(\"index\", i, \"->\", rails[i])\nprint(\"loop ran exactly\", len(rails), \"times — count matches length\")"
+    },
+    {
+      "type": "md",
+      "source": "## 057 · Text vs bytes\n\n`str` is decoded text (code points); `bytes` are raw octets; convert only at the edges with `.encode()`/`.decode()` - never mix the two.\n\n*A border checkpoint between meaning-land and wire-land: prose must pass the encode booth to become numbered freight, and freight must pass decode to become prose. No cargo walks through untranslated.*\n\nWatch: 'é' becomes two bytes on the wire, and the ascii booth rejects the first of them (0xc3)."
+    },
+    {
+      "type": "code",
+      "source": "# INTENDED ERROR — read the traceback\nfreight = \"café\".encode(\"utf-8\")\nprint(\"text 'café' encoded ->\", freight, \"| type:\", type(freight).__name__, \"| length:\", len(freight), \"bytes for 4 characters\")\nfreight.decode(\"ascii\")   # wrong booth: ascii cannot read byte 0xc3"
+    },
+    {
+      "type": "code",
+      "source": "# FIX: decode with the codec that produced the bytes\nfreight = \"café\".encode(\"utf-8\")\nprose = freight.decode(\"utf-8\")\nprint(\"bytes\", freight, \"-> .decode('utf-8') ->\", repr(prose), \"| type:\", type(prose).__name__)\nprint(\"round trip intact:\", prose == \"café\")"
+    },
+    {
+      "type": "md",
+      "source": "## 063 · 0.1 + 0.2 problem\n\n`0.1 + 0.2 == 0.30000000000000004` because 0.1 and 0.2 have no finite binary expansion - like 1/3 in decimal, rounded at parse time.\n\n*Two measuring cups labeled 0.1 and 0.2, each secretly overfilled by a molecule at the factory (binary rounding): pour them together and the beaker needle trembles at 0.30000000000000004.*\n\nWatch: the repr exposes the trembling needle; `==` fails, while `math.isclose` and `Decimal` behave — and the inputs, not the addition, are to blame."
+    },
+    {
+      "type": "code",
+      "source": "import math\nfrom decimal import Decimal\n\ns = 0.1 + 0.2\nprint(\"0.1 + 0.2                     ->\", repr(s))\nprint(\"0.1 + 0.2 == 0.3              ->\", s == 0.3)\nprint(\"math.isclose(0.1 + 0.2, 0.3)  ->\", math.isclose(s, 0.3))\nprint(\"Decimal('0.1')+Decimal('0.2') ->\", Decimal(\"0.1\") + Decimal(\"0.2\"))\nprint(\"blame the inputs: 0.1 is really %.20f\" % 0.1)"
+    },
+    {
+      "type": "md",
+      "source": "## 079 · Re-raise & exception chaining\n\nBare `raise` rethrows the current exception intact; `raise New(...) from e` wraps it while preserving the original cause and traceback.\n\n*A relay runner catches a flaming baton, tapes a note to it - 'happened while loading config' - and hurls it onward; the tape ('from e') keeps the original scorch marks readable underneath.*\n\nWatch: the traceback shows the original KeyError first, then \"the direct cause of\", then the new ValueError — two layers, one story."
+    },
+    {
+      "type": "code",
+      "source": "# INTENDED ERROR — read the traceback\nconfig = {\"host\": \"localhost\"}\nprint(\"config =\", config, \"— now asking for the missing 'port'...\")\ntry:\n    port = config[\"port\"]\nexcept KeyError as e:\n    raise ValueError(\"bad config: missing 'port'\") from e"
+    },
+    {
+      "type": "code",
+      "source": "# FIX: a caller can catch the wrapper and still read the original scorch marks via __cause__\nconfig = {\"host\": \"localhost\"}\ntry:\n    try:\n        port = config[\"port\"]\n    except KeyError as e:\n        raise ValueError(\"bad config: missing 'port'\") from e\nexcept ValueError as err:\n    print(\"caught    :\", repr(err))\n    print(\"__cause__ :\", repr(err.__cause__), \"(original preserved by 'from e')\")"
+    },
+    {
+      "type": "md",
+      "source": "## 083 · with statement (context manager)\n\n`with open(...) as f` guarantees `close()` on block exit - success or exception - via `__enter__`/`__exit__`; RAII's Python cousin.\n\n*A submarine airlock: step in and the machinery arms itself; however you leave - walking out calmly or blown out by an explosion - the hatch slams and seals itself behind you.*\n\nWatch: `f.closed` flips from False inside the block to True after it — and no one ever called `close()`."
+    },
+    {
+      "type": "code",
+      "source": "import tempfile, os\n\nfd, path = tempfile.mkstemp(suffix=\".txt\")\nos.close(fd)\n\nwith open(path, \"w\") as f:\n    f.write(\"sealed cargo\")\n    print(\"inside the airlock : f.closed =\", f.closed)\nprint(\"after the block    : f.closed =\", f.closed, \"(hatch sealed itself — no close() call)\")\n\nwith open(path) as f:\n    print(\"read back          :\", repr(f.read()))\nos.remove(path)"
+    },
+    {
+      "type": "md",
+      "source": "## 099 · Aliasing\n\nAliasing is two names bound to one object, so mutation through either shows through both; `b = a` copies nothing - use `copy()` to fork.\n\n*One actor working two shows under two stage names: shave 'Bob' bald for the matinee and 'Robert' walks on stage bald that evening - only hiring a body double (copy) gets you two heads of hair.*\n\nWatch: the append made through `b` shows up in `a`; only `list(a)` creates a second object that mutates independently."
+    },
+    {
+      "type": "code",
+      "source": "a = [1]\nb = a                # no copy: second stage name for the same actor\nb.append(2)\nprint(\"after b.append(2): a =\", a, \"| b =\", b, \"| a is b:\", a is b)\n\nc = list(a)          # the body double: a real second object\nc.append(99)\nprint(\"after c = list(a); c.append(99):\")\nprint(\"  a =\", a, \"(unchanged) | c =\", c, \"| a is c:\", a is c)"
+    }
+  ]
+}

@@ -1,0 +1,129 @@
+{
+  "notebook": "300_functions_fp",
+  "cells": [
+    {
+      "type": "md",
+      "source": "# 300 · Functions & functional programming — procedural layer\n\n**Mnemonic — rule of three: input → transform → output; the lambda.**\n\nCodes in this notebook: **305, 314, 325, 333, 344, 356, 363, 373, 381, 394**\n\n**Method:** for every code cell — read it, **PREDICT** the exact output, run it, **COMPARE**. A wrong prediction is the lesson: reread until the output feels inevitable. Run cells top to bottom in a single kernel. Exactly two cells are *supposed* to raise; both are marked `# INTENDED ERROR — read the traceback`."
+    },
+    {
+      "type": "md",
+      "source": "## 305 · Default parameter values\n\nA fallback value in the signature used when the caller omits that argument; Python evaluates it once, at definition time.\n\n*A diner menu: \"burger comes with fries unless you say otherwise\" — but the kitchen keeps ONE shared basket of fries, reused for every order (the mutable-default trap).*\n\n**Watch:** the second call to `bad_append` — does it get a fresh list, or last call's leftovers?"
+    },
+    {
+      "type": "code",
+      "source": "def bad_append(x, acc=[]):          # acc is created ONCE, at def time\n    acc.append(x)\n    return acc\n\nprint(\"call 1:\", bad_append(1))\nprint(\"call 2:\", bad_append(2))     # predict: [2]? the SAME basket of fries survives\nprint(\"the shared default itself:\", bad_append.__defaults__)"
+    },
+    {
+      "type": "code",
+      "source": "def good_append(x, acc=None):       # None sentinel: build the list INSIDE\n    if acc is None:\n        acc = []\n    acc.append(x)\n    return acc\n\nprint(\"call 1:\", good_append(1))\nprint(\"call 2:\", good_append(2))    # a fresh basket every order\nprint(\"default stays inert:\", good_append.__defaults__)"
+    },
+    {
+      "type": "md",
+      "source": "## 314 · Loop-variable capture bug\n\nClosures created in a loop all share the single loop variable, so after the loop every one of them sees its final value.\n\n*Ten balloons all tied to one weather vane: when the wind dies, all ten point wherever the vane last settled — nobody kept their own direction.*\n\n**Watch:** three lambdas built while `i` was 0, 1, 2 — what does each return once the loop has ended?"
+    },
+    {
+      "type": "code",
+      "source": "fns = []\nfor i in range(3):\n    fns.append(lambda: i)          # captures the VARIABLE i, not its value\n\nprint(\"loop finished, i =\", i)     # the weather vane's final direction\nprint(\"buggy round:\", [f() for f in fns])   # predict [0, 1, 2]?"
+    },
+    {
+      "type": "code",
+      "source": "fns = []\nfor i in range(3):\n    fns.append(lambda i=i: i)      # default arg evaluates i NOW: a private snapshot\n\nprint(\"fixed round:        \", [f() for f in fns])\n\ncomp = [lambda i=i: i for i in range(3)]    # same fix inside a comprehension\nprint(\"comprehension fixed:\", [f() for f in comp])"
+    },
+    {
+      "type": "md",
+      "source": "## 325 · reduce (fold)\n\nCollapses a sequence to a single value by repeatedly combining an accumulator with each element using a binary function.\n\n*A snowball rolling downhill swallows flake after flake — each pass folds one more snowflake into the growing ball, and a single boulder arrives at the bottom.*\n\n**Watch:** the shape shrinks stage by stage — list → list → one number. Predict all three printed values before running."
+    },
+    {
+      "type": "code",
+      "source": "from functools import reduce\n\norders = [3, 7, 2, 9, 4, 11, 5]\nprint(\"input:        \", orders)\n\ndoubled = list(map(lambda x: x * 2, orders))\nprint(\"map (x2):     \", doubled)\n\nbig = list(filter(lambda x: x > 8, doubled))\nprint(\"filter (>8):  \", big)\n\ntotal = reduce(lambda acc, x: acc + x, big, 0)   # the fold: one boulder arrives\nprint(\"reduce (sum): \", total)"
+    },
+    {
+      "type": "md",
+      "source": "## 333 · Idempotence\n\nApplying an operation more than once has the same effect as applying it once — `f(f(x)) == f(x)`; safe to retry.\n\n*An elevator button already glowing: mash it five more times and the elevator's plan does not change. The first press did everything.*\n\n**Watch:** which operations survive a double application unchanged — and which one compounds on every press?"
+    },
+    {
+      "type": "code",
+      "source": "print(\"abs once :\", abs(-5))\nprint(\"abs twice:\", abs(abs(-5)), \"-> equal:\", abs(abs(-5)) == abs(-5))\n\ndata = [3, 1, 2]\nonce = sorted(data)\ntwice = sorted(sorted(data))\nprint(\"sort once :\", once)\nprint(\"sort twice:\", twice, \"-> equal:\", once == twice)\n\ns = {1, 2, 3}\nprint(\"s | s     :\", sorted(s | s), \"-> equal to s:\", (s | s) == s)"
+    },
+    {
+      "type": "code",
+      "source": "counter = 0\ncounter += 1\nprint(\"after one press :\", counter)\ncounter += 1\nprint(\"after two presses:\", counter, \"<- the effect compounds: NOT idempotent\")\ncounter += 1\nprint(\"after three     :\", counter, \"<- every retry changes the world again\")"
+    },
+    {
+      "type": "md",
+      "source": "## 344 · Defensive copy\n\nCopy mutable data at trust boundaries — going into and out of your object — so outsiders holding a reference cannot mutate your internals.\n\n*The museum hands visitors a replica sword to swing around while the real blade stays in the vault; scratch the copy all you like.*\n\n**Watch:** the object's state after an outsider appends to what the getter returned — corrupted, or intact?"
+    },
+    {
+      "type": "code",
+      "source": "class Playlist:\n    def __init__(self, tracks):\n        self._tracks = tracks           # stores the caller's list directly\n    def tracks(self):\n        return self._tracks             # hands out the real blade\n\np = Playlist([\"intro\", \"chorus\"])\nprint(\"state before:\", p.tracks())\nstolen = p.tracks()\nstolen.append(\"vandalism\")              # outsider swings our internals around\nprint(\"state after :\", p.tracks())"
+    },
+    {
+      "type": "code",
+      "source": "class SafePlaylist:\n    def __init__(self, tracks):\n        self._tracks = list(tracks)     # copy IN at the boundary\n    def tracks(self):\n        return list(self._tracks)       # copy OUT: a replica sword\n\nsp = SafePlaylist([\"intro\", \"chorus\"])\nprint(\"state before:\", sp.tracks())\nreplica = sp.tracks()\nreplica.append(\"vandalism\")             # only scratches the replica\nprint(\"state after :\", sp.tracks())"
+    },
+    {
+      "type": "md",
+      "source": "## 356 · Currying (and partial application)\n\nTransforming an n-argument function into a chain of one-argument functions: `f(a, b, c)` becomes `f(a)(b)(c)`. Partial application is the sibling: pre-fill some args of a normal function once.\n\n*A curry house that accepts one spice at a time: hand over cumin and get back a chef who now wants coriander; only after the final spice does dinner appear.*\n\n**Watch:** what `partial(pow, 2)` pre-fills (the base), and what `add(5)` returns — a value, or a chef waiting for the next argument?"
+    },
+    {
+      "type": "code",
+      "source": "from functools import partial\n\ntwo_to_the = partial(pow, 2)            # pre-fill base=2 once\nprint(\"partial(pow, 2)(10):\", two_to_the(10))\nprint(\"partial(pow, 2)(3): \", two_to_the(3))\nprint(\"partial(pow, 2)(0): \", two_to_the(0))"
+    },
+    {
+      "type": "code",
+      "source": "def add(a):                             # hand-rolled curry: one spice at a time\n    def waiting_for_b(b):\n        return a + b\n    return waiting_for_b\n\nadd5 = add(5)\nprint(\"add(5) returns a:\", type(add5).__name__, \"- a chef waiting for b\")\nprint(\"add(5)(3)  =\", add5(3))\nprint(\"add(5)(40) =\", add5(40))\nprint(\"add(1)(2)  =\", add(1)(2))        # both spices in one breath"
+    },
+    {
+      "type": "md",
+      "source": "## 363 · Generator function\n\nA function containing `yield`: calling it returns a generator, and each `next()` resumes the body until the next yield, pausing in place.\n\n*A bard who freezes mid-sentence the instant he hands you a verse — statue-still, wine glass raised — and thaws exactly there when you tap his shoulder for the next line.*\n\n**Watch:** the exact interleaving of prints inside vs. outside the body; what the third `next()` does; what a second pass over an exhausted generator yields."
+    },
+    {
+      "type": "code",
+      "source": "def bard(n):\n    print(\"  bard: clearing throat\")            # runs only on FIRST next()\n    for i in range(1, n + 1):\n        print(f\"  bard: about to yield verse {i}\")\n        yield f\"verse {i}\"\n        print(f\"  bard: thawed after verse {i}\")\n    print(\"  bard: bowing out\")\n\ng = bard(2)\nprint(\"generator created - predict: has anything printed from inside yet?\")\nprint(\"got:\", next(g))\nprint(\"got:\", next(g))"
+    },
+    {
+      "type": "code",
+      "source": "# INTENDED ERROR — read the traceback\nprint(\"tapping the exhausted bard's shoulder one more time...\")\nnext(g)   # body resumes, bows out, then raises StopIteration"
+    },
+    {
+      "type": "code",
+      "source": "squares = (x * x for x in range(4))\nprint(\"first pass :\", [s for s in squares])\nprint(\"second pass:\", [s for s in squares], \"<- one-shot: already exhausted\")\n\nmaterialized = list(x * x for x in range(4))    # list() drains it ONCE, keeps all\nprint(\"list() copy:\", materialized)\nprint(\"walk again :\", [s for s in materialized], \"<- a list can be re-walked forever\")"
+    },
+    {
+      "type": "md",
+      "source": "## 373 · Destructuring\n\nBinding names to pieces of a structure in one pattern-shaped assignment — unpacking tuples, dicts, or objects by their shape.\n\n*A chocolate orange: one sharp twist and it falls apart into labeled segments that land in your named, cupped fingers.*\n\n**Watch:** which elements `*mid` swallows; which dict wins the merge on clashing keys; which `case` each shape falls into."
+    },
+    {
+      "type": "code",
+      "source": "a, *mid, b = [1, 2, 3, 4, 5]        # star soaks up the middle segments\nprint(\"a  :\", a)\nprint(\"mid:\", mid)\nprint(\"b  :\", b)\n\ndefaults = {\"x\": 0, \"y\": 0, \"z\": 0}\npoint = {\"x\": 3, \"y\": 4}\nmerged = {**defaults, **point}       # dict unpack: later keys win the clash\nprint(\"merged:\", merged)"
+    },
+    {
+      "type": "code",
+      "source": "def describe(shape):\n    match shape:\n        case (\"point\", x, y):                # shape-driven binding + dispatch\n            return f\"point at x={x}, y={y}\"\n        case (\"circle\", r):\n            return f\"circle of radius {r}\"\n        case _:\n            return \"unknown shape\"\n\nprint(describe((\"point\", 3, 4)))\nprint(describe((\"circle\", 7)))\nprint(describe((\"blob\",)))"
+    },
+    {
+      "type": "md",
+      "source": "## 381 · Option / Maybe\n\nA container holding either one value (Some/Just) or nothing (None/Nothing), forcing callers to acknowledge absence in the type.\n\n*A ring box that might be empty: the box's very shape forces you to open it and look before proposing — you cannot slide an unopened box onto a finger.*\n\n**Watch:** the None-checking pyramid versus one helper that acknowledges absence exactly once — same two answers, radically different shape."
+    },
+    {
+      "type": "code",
+      "source": "user  = {\"profile\": {\"address\": {\"city\": \"Lisbon\"}}}\nghost = {\"profile\": {}}                       # the address level is missing\n\ndef city_pyramid(d):                          # open every box by hand\n    profile = d.get(\"profile\")\n    if profile is not None:\n        address = profile.get(\"address\")\n        if address is not None:\n            city = address.get(\"city\")\n            if city is not None:\n                return city\n    return \"<missing>\"\n\nprint(\"present:\", city_pyramid(user))\nprint(\"missing:\", city_pyramid(ghost))"
+    },
+    {
+      "type": "code",
+      "source": "def get_in(d, path, default=None):            # acknowledge absence ONCE\n    for key in path:\n        if not isinstance(d, dict) or key not in d:\n            return default                    # the ring box was empty\n        d = d[key]\n    return d\n\nprint(\"present:\", get_in(user,  [\"profile\", \"address\", \"city\"], \"<missing>\"))\nprint(\"missing:\", get_in(ghost, [\"profile\", \"address\", \"city\"], \"<missing>\"))"
+    },
+    {
+      "type": "md",
+      "source": "## 394 · Duck typing\n\nDynamic-language polymorphism: any object with the right methods works, checked only at the call — if it quacks, it's a duck.\n\n*A duck-call contest judged blindfolded: a robot, a comedian, and an actual duck all advance, because the judge only ever listens for the quack().*\n\n**Watch:** the judge never checks types — only the quack. What happens the moment a Rock without one steps up?"
+    },
+    {
+      "type": "code",
+      "source": "class Duck:\n    def quack(self):\n        return \"quack!\"\n\nclass Robot:\n    def quack(self):\n        return \"QUACK.EXE\"\n\ndef judge(contestant):                      # blindfolded: no isinstance anywhere\n    print(\"heard:\", contestant.quack())\n\njudge(Duck())\njudge(Robot())"
+    },
+    {
+      "type": "code",
+      "source": "# INTENDED ERROR — read the traceback\nclass Rock:\n    pass                                    # no quack() at all\n\nprint(\"a rock rolls up to the microphone...\")\njudge(Rock())   # AttributeError, only discovered at the call"
+    }
+  ]
+}

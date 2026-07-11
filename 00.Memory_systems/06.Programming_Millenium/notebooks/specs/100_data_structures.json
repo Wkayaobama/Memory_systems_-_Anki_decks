@@ -1,0 +1,89 @@
+{
+  "notebook": "100_data_structures",
+  "cells": [
+    {
+      "type": "md",
+      "source": "# 100 · Data structures — procedural layer\n\n**Mnemonic:** 1 looks like a single node or cell — data as items chained one to the next.\n\n**Codes covered:** 104, 116, 127, 132, 143, 156, 167, 173, 182, 195.\n\n**Method:** read each code cell and PREDICT the exact output, then run it and compare. The matrix holds the imagery; this notebook engraves the net effects — what each structure actually does to your data when you press Enter."
+    },
+    {
+      "type": "md",
+      "source": "## 104 · Amortized O(1) append\n\nOccasional O(n) resize copies are spread across the many cheap appends before them, averaging to constant time per append.\n\n*A mortgage: one huge house price paid off in tiny monthly installments — each append pays a small installment toward the rare big copy.*\n\n**Watch:** the byte size only jumps at a handful of lengths, and the gaps between jumps widen geometrically. Every append between two jumps costs nothing extra — those cheap appends prepay the rare copy."
+    },
+    {
+      "type": "code",
+      "source": "import sys\n\nlst = []\nprev = sys.getsizeof(lst)\nprint(f\"len=0   size={prev} bytes\")\nfor i in range(1, 65):\n    lst.append(i)\n    size = sys.getsizeof(lst)\n    if size != prev:\n        print(f\"len={len(lst):<3} size jumped {prev} -> {size} bytes\")\n        prev = size\nprint(\"64 appends, only a few resizes: the copies average out to O(1) per append.\")"
+    },
+    {
+      "type": "md",
+      "source": "## 116 · Floyd cycle detection\n\nIf a fast pointer (2 steps) and a slow pointer (1 step) ever land on the same node, the list has a cycle; on a straight list fast hits null first.\n\n*Tortoise and hare on a circular racetrack: on a loop the hare must eventually lap and collide with the tortoise; on a straight road the hare just vanishes over the horizon.*\n\n**Watch:** the same function flips True/False as we bend the last node's pointer back and then straighten it again — O(1) extra space, no visited set."
+    },
+    {
+      "type": "code",
+      "source": "class Node:\n    def __init__(self, val):\n        self.val = val\n        self.next = None\n\ndef has_cycle(head):\n    slow = fast = head\n    while fast and fast.next:\n        slow, fast = slow.next, fast.next.next\n        if slow is fast:\n            return True\n    return False\n\nnodes = [Node(v) for v in range(1, 6)]\nfor a, b in zip(nodes, nodes[1:]):\n    a.next = b\n\nprint(\"straight list 1->2->3->4->5:\", has_cycle(nodes[0]))\nnodes[-1].next = nodes[1]  # bend 5's pointer back to 2\nprint(\"cycle added   5 -> 2      :\", has_cycle(nodes[0]))\nnodes[-1].next = None      # straighten it again\nprint(\"cycle broken              :\", has_cycle(nodes[0]))"
+    },
+    {
+      "type": "md",
+      "source": "## 127 · Queue from two stacks\n\nPush into an inbox stack; when the outbox stack is empty, pour the whole inbox into it, reversing order so pops come out FIFO.\n\n*Two Pringles cans: drop chips into can A; to serve, flip A upside down over can B — the oldest chip lands on top of B, ready to serve first.*\n\n**Watch:** three LIFO pushes come back out in FIFO order 1, 2, 3 — two reversals cancel. Each element moves at most twice, so it is amortized O(1) per operation."
+    },
+    {
+      "type": "code",
+      "source": "class Queue2Stacks:\n    def __init__(self):\n        self.inbox, self.outbox = [], []\n    def enqueue(self, x):\n        self.inbox.append(x)\n    def dequeue(self):\n        if not self.outbox:\n            while self.inbox:\n                self.outbox.append(self.inbox.pop())  # the flip: LIFO reversed\n        return self.outbox.pop()\n\nq = Queue2Stacks()\nfor x in (1, 2, 3):\n    q.enqueue(x)\n    print(\"enqueue\", x, \"-> inbox:\", q.inbox, \"outbox:\", q.outbox)\nfor _ in range(3):\n    print(\"dequeue ->\", q.dequeue(), \"| inbox:\", q.inbox, \"outbox:\", q.outbox)\nprint(\"In 1,2,3 -> out 1,2,3: FIFO built from two LIFOs.\")"
+    },
+    {
+      "type": "md",
+      "source": "## 132 · Hash collision\n\nTwo different keys landing in the same bucket — inevitable by the pigeonhole principle, so every table needs a resolution strategy.\n\n*Ten pigeons, nine pigeonholes: two pigeons must share one hole, feathers flying. Two strangers' coats both hashed to cubby 47.*\n\n**Watch:** every instance hashes to 7, so all of them land in the same bucket — yet the set stays perfectly correct, because `__eq__` tells colliding keys apart inside the bucket. Collisions cost speed (toward O(n)), never correctness."
+    },
+    {
+      "type": "code",
+      "source": "class Badge:\n    def __init__(self, name):\n        self.name = name\n    def __hash__(self):\n        return 7  # every badge collides on purpose\n    def __eq__(self, other):\n        return isinstance(other, Badge) and self.name == other.name\n\na, b = Badge(\"Ada\"), Badge(\"Bob\")\nprint(\"hash(a) =\", hash(a), \"| hash(b) =\", hash(b), \"-> both land in the same bucket\")\ns = {a, b}\nprint(\"set size          :\", len(s), \"(collision did not merge them)\")\nprint(\"members           :\", sorted(x.name for x in s))\nprint(\"Badge('Ada') in s :\", Badge(\"Ada\") in s)\nprint(\"Badge('Eve') in s :\", Badge(\"Eve\") in s)\nprint(\"Same bucket, disambiguated by ==: correctness survives, only speed degrades.\")"
+    },
+    {
+      "type": "md",
+      "source": "## 143 · In-order traversal\n\nVisit the left subtree, then the node, then the right subtree; on a BST this yields every key in ascending sorted order.\n\n*Touring the branching library: read the entire left wing, then the librarian's own book, then the right wing — you exit having read all titles in perfect alphabetical order.*\n\n**Watch:** values inserted in shuffled order come back out sorted. The tree's shape encodes the order; left-node-right just reads it off."
+    },
+    {
+      "type": "code",
+      "source": "import random\n\ndef insert(tree, v):\n    if tree is None:\n        return {\"val\": v, \"left\": None, \"right\": None}\n    side = \"left\" if v < tree[\"val\"] else \"right\"\n    tree[side] = insert(tree[side], v)\n    return tree\n\ndef inorder(tree, out):\n    if tree:\n        inorder(tree[\"left\"], out)   # left wing\n        out.append(tree[\"val\"])      # the librarian's own book\n        inorder(tree[\"right\"], out)  # right wing\n    return out\n\nrandom.seed(42)\nvalues = list(range(1, 16))\nrandom.shuffle(values)\nprint(\"insertion order:\", values)\n\nroot = None\nfor v in values:\n    root = insert(root, v)\n\nvisited = inorder(root, [])\nprint(\"in-order visit :\", visited)\nprint(\"sorted?        :\", visited == sorted(values))"
+    },
+    {
+      "type": "md",
+      "source": "## 156 · Trie (prefix tree)\n\nA tree keyed by characters: each root-to-node path spells a prefix, so lookup and autocomplete cost O(word length), not O(word count).\n\n*A choose-your-own-adventure spelling: from the lobby take hallway 'c', then 'a', then 't' — the room lights up 'word!' and corridors continue toward 'cats' and 'catalog'. Say 'trie' as in reTRIEval.*\n\n**Watch:** a prefix query returns the whole word family for the cost of walking the prefix's letters — 'ca' finds four words without ever scanning the word list."
+    },
+    {
+      "type": "code",
+      "source": "words = [\"cat\", \"cats\", \"catalog\", \"car\", \"dog\"]\n\nroot = {}\nfor w in words:\n    node = root\n    for ch in w:\n        node = node.setdefault(ch, {})\n    node[\"$\"] = True  # end-of-word marker\n\ndef with_prefix(prefix):\n    node = root\n    for ch in prefix:          # O(len(prefix)) walk, not O(word count)\n        if ch not in node:\n            return []\n        node = node[ch]\n    found = []\n    def walk(n, path):\n        if \"$\" in n:\n            found.append(prefix + path)\n        for c in sorted(k for k in n if k != \"$\"):\n            walk(n[c], path + c)\n    walk(node, \"\")\n    return found\n\nprint(\"words in trie:\", words)\nfor p in (\"ca\", \"cat\", \"do\", \"z\"):\n    print(f\"prefix {p!r:6} ->\", with_prefix(p))"
+    },
+    {
+      "type": "md",
+      "source": "## 167 · Top-k via size-k heap\n\nKeep a min-heap of the k best seen: a newcomer beating the heap's root replaces it — O(n log k) time, O(k) space, stream-friendly.\n\n*A ten-champion hall of fame where the doorman is the WEAKEST champion: every challenger fights only the doorman — win, and you take his plaque while the new weakest walks to the door.*\n\n**Watch:** a heap that never holds more than 5 numbers produces exactly the same top-5 as sorting all 1000 — the twist is that top-k LARGEST uses a MIN-heap as gatekeeper."
+    },
+    {
+      "type": "code",
+      "source": "import heapq\nimport random\n\nrandom.seed(42)\nstream = [random.randint(0, 1_000_000) for _ in range(1000)]\n\nk = 5\nheap = []\nfor x in stream:\n    if len(heap) < k:\n        heapq.heappush(heap, x)\n    elif x > heap[0]:              # challenger beats the weakest champion\n        heapq.heapreplace(heap, x)\n\ntop_via_heap = sorted(heap, reverse=True)\ntop_via_sort = sorted(stream, reverse=True)[:k]\nprint(\"heap top-5   :\", top_via_heap)\nprint(\"sorted()[:5] :\", top_via_sort)\nprint(\"same answer  :\", top_via_heap == top_via_sort)\nprint(f\"but the heap held only {k} numbers while streaming all {len(stream)}.\")"
+    },
+    {
+      "type": "md",
+      "source": "## 173 · Adjacency list\n\nFor each vertex, store a list of its neighbors: O(V+E) space and fast iteration over a node's edges — the default for sparse graphs.\n\n*Every guest at a party holds a slim personal address book listing only their friends: to see Bob's circle you read Bob's booklet, never the whole town census.*\n\n**Watch:** one dict lookup hands you B's neighbors instantly; the edge list makes you walk every edge in the graph to collect the same answer."
+    },
+    {
+      "type": "code",
+      "source": "adj = {\n    \"A\": [\"B\", \"C\"],\n    \"B\": [\"C\", \"D\"],\n    \"C\": [\"D\"],\n    \"D\": [],\n}\nedge_list = [(u, v) for u, nbrs in adj.items() for v in nbrs]\nprint(\"edge list:\", edge_list)\n\nprint(\"neighbors of B, adjacency list:\", adj[\"B\"], \"  <- one O(1) dict lookup\")\n\nchecked = 0\nscan = []\nfor (u, v) in edge_list:\n    checked += 1\n    if u == \"B\":\n        scan.append(v)\nprint(\"neighbors of B, edge-list scan:\", scan, f\"  <- walked all {checked} edges\")\nprint(\"Same answer; the adjacency list read one booklet, the scan read the census.\")"
+    },
+    {
+      "type": "md",
+      "source": "## 182 · Union-find (disjoint sets)\n\nTracks a partition of items into groups: find(x) walks to the group's root representative; union(a,b) merges two groups by linking roots.\n\n*Clan totems: every villager points at a parent villager, chains ending at the clan chief; a marriage (union) simply makes one chief bow to the other, fusing whole clans in one gesture.*\n\n**Watch:** six unions collapse ten singletons into four components, each merge a single pointer change — and path compression flattens the chains as find() walks them."
+    },
+    {
+      "type": "code",
+      "source": "parent = list(range(10))  # everyone starts as their own chief\n\ndef find(x):\n    while parent[x] != x:\n        parent[x] = parent[parent[x]]  # path compression: point at grandparent\n        x = parent[x]\n    return x\n\ndef union(a, b):\n    parent[find(a)] = find(b)          # one chief bows to the other\n\nfor a, b in [(0, 1), (1, 2), (3, 4), (5, 6), (6, 7), (8, 9)]:\n    union(a, b)\n    print(f\"union({a},{b})\")\n\ngroups = {}\nfor x in range(10):\n    groups.setdefault(find(x), []).append(x)\nprint(\"components      :\", sorted(groups.values()))\nprint(\"connected(0, 2) :\", find(0) == find(2))\nprint(\"connected(0, 3) :\", find(0) == find(3))"
+    },
+    {
+      "type": "md",
+      "source": "## 195 · Array vs list vs map\n\nDefault to a dynamic array; take a hashmap when keyed lookup dominates; take a linked structure only when O(1) mid-sequence splicing truly matters.\n\n*Three containers on the decision counter: a numbered pill organizer (array — position is meaning), a valet board of name-tagged hooks (map — find by name), and a paper chain you can snip anywhere (list — splice).*\n\n**Watch:** the same membership question against the same 20,000 values — the list scans, the set hashes. The exact times vary per machine, but the ratio is brutal and grows with n. When lookup dominates, take the map."
+    },
+    {
+      "type": "code",
+      "source": "import timeit\n\nn = 20_000\ndata_list = list(range(n))\ndata_set = set(data_list)\nneedle = n - 1  # worst case for the list: the last element\n\nt_list = timeit.timeit(lambda: needle in data_list, number=2_000)\nt_set = timeit.timeit(lambda: needle in data_set, number=2_000)\n\nprint(f\"x in list : {t_list:.4f}s  (each probe scans up to {n:,} items)\")\nprint(f\"x in set  : {t_set:.4f}s  (each probe is one hash lookup)\")\nprint(f\"set wins by ~{t_list / t_set:,.0f}x here, and the gap widens as n grows.\")"
+    }
+  ]
+}

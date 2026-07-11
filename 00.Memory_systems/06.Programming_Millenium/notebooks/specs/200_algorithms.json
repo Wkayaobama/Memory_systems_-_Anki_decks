@@ -1,0 +1,97 @@
+{
+  "notebook": "200_algorithms",
+  "cells": [
+    {
+      "type": "md",
+      "source": "# 200 · Algorithms & complexity — procedural layer\n\n**Mnemonic:** 2 = binary — compare two things, split in two (binary search, O(n²) pairwise comparisons).\n\n**Codes covered:** 205, 211, 226, 230, 242, 253, 266, 270, 283, 290.\n\n**Method:** for every code cell — read it, **PREDICT the output**, run it, compare. The gap between your prediction and reality is the lesson. Exactly one cell in this notebook is *supposed* to raise (242); it is marked `# INTENDED ERROR`."
+    },
+    {
+      "type": "md",
+      "source": "## 205 · O(n²) quadratic time\n\nRuntime grows with the square of n — typical of nested loops comparing all pairs; double n, quadruple time.\n\n*A party where every guest must clink glasses with every other guest: 10 guests, a quick toast; 1000 guests, shattered glass till dawn.*\n\n**Watch:** we count operations, never wall-clock. Predict both counters and their ratio before running."
+    },
+    {
+      "type": "code",
+      "source": "def count_pair_ops(n):\n    ops = 0\n    for i in range(n):\n        for j in range(n):\n            ops += 1          # one \"clink\" per pair (i, j)\n    return ops\n\nsmall = count_pair_ops(200)\nbig = count_pair_ops(400)\nprint(\"n=200 ->\", small, \"operations\")\nprint(\"n=400 ->\", big, \"operations\")\nprint(\"ratio :\", big / small, \"  (double n -> ~4x the work)\")"
+    },
+    {
+      "type": "md",
+      "source": "## 211 · Binary search\n\nOn sorted data, compare the middle element and discard the half that cannot contain the target — O(log n) halvings.\n\n*Dictionary word hunt: flip open dead center — \"M... my word starts with T\" — rip away the left half and repeat. Ten rips find any word.*\n\n**Watch:** predict the step counter for a 1,000,000-element range. log2(1,000,000) ≈ 19.9 — how many halvings can it possibly take?"
+    },
+    {
+      "type": "code",
+      "source": "def binary_search(a, target):\n    lo, hi = 0, len(a) - 1\n    steps = 0\n    while lo <= hi:\n        steps += 1\n        mid = (lo + hi) // 2\n        if a[mid] < target:\n            lo = mid + 1\n        elif a[mid] > target:\n            hi = mid - 1\n        else:\n            return mid, steps\n    return -1, steps\n\nhaystack = range(1_000_000)          # sorted 0..999_999\nidx, steps = binary_search(haystack, 742_617)\nprint(\"found at index\", idx, \"in\", steps, \"steps\")\nprint(\"a linear scan would have taken\", 742_618, \"steps\")"
+    },
+    {
+      "type": "code",
+      "source": "import bisect\n\nidx = bisect.bisect_left(range(1_000_000), 742_617)\nprint(\"bisect.bisect_left ->\", idx, \" (same answer, stdlib one-liner)\")"
+    },
+    {
+      "type": "md",
+      "source": "## 226 · Sort stability\n\nA stable sort keeps equal keys in original relative order, so chained sorts build multi-key orderings; mergesort/Timsort are stable, quicksort/heapsort are not.\n\n*A stable horse barn: two horses both named Bay trot out the gate exactly in the order they trotted in. The unstable barn next door shuffles the twins nightly.*\n\n**Watch:** after the second sort (by city), predict the order of the Paris rows. Does the rank order from the first sort survive inside each city?"
+    },
+    {
+      "type": "code",
+      "source": "records = [\n    (\"Ada\", \"Paris\", 3),\n    (\"Bo\",  \"Tokyo\", 1),\n    (\"Cy\",  \"Paris\", 1),\n    (\"Dee\", \"Tokyo\", 2),\n    (\"Eli\", \"Paris\", 2),\n]\nprint(\"original:\")\nfor r in records:\n    print(\"  \", r)\n\nrecords.sort(key=lambda r: r[2])   # first pass: by rank\nrecords.sort(key=lambda r: r[1])   # second pass: by city (stable!)\n\nprint(\"after sort by rank, then by city:\")\nfor r in records:\n    print(\"  \", r)\nprint(\"within each city the rank order survives -> two stable sorts = one multi-key sort\")"
+    },
+    {
+      "type": "md",
+      "source": "## 230 · Counting sort\n\nFor integer keys in a small range k: tally occurrences into a count array, then walk the tallies in order — O(n + k), stable, zero comparisons.\n\n*A mail room with 100 numbered pigeonholes: nobody compares letters — each drops straight into its numbered hole, then you walk the wall left to right scooping them out in order.*\n\n**Watch:** there is no `<` between elements anywhere. Predict the sorted output, then find the comparison the code never makes."
+    },
+    {
+      "type": "code",
+      "source": "data = [4, 1, 3, 4, 0, 2, 4, 1, 9, 3, 0, 5]\n\nk = max(data)\ncnt = [0] * (k + 1)\nfor x in data:\n    cnt[x] += 1                       # tally into pigeonhole x\nout = [v for v in range(k + 1) for _ in range(cnt[v])]\n\nprint(\"input :\", data)\nprint(\"sorted:\", out)\nprint(\"no element was ever compared to another -- only counted\")"
+    },
+    {
+      "type": "md",
+      "source": "## 242 · Stack depth and overflow\n\nEvery active call holds a stack frame; recursing deeper than the limit crashes (Python default ~1000) — DEPTH matters, not total call count.\n\n*A waiter stacking one plate per unfinished order: linear recursion over a million items piles plates to the ceiling until the tower crashes down — RecursionError.*\n\n**Watch:** the next cell is SUPPOSED to fail. Predict the exception name before running, then read the traceback's repeating frame. The follow-up cell prints the limit and shows the loop that shrugs it off."
+    },
+    {
+      "type": "code",
+      "source": "# INTENDED ERROR — read the traceback\ndef countdown(n):\n    return 0 if n == 0 else countdown(n - 1)\n\ncountdown(100_000)   # depth 100_000 >> the recursion limit"
+    },
+    {
+      "type": "code",
+      "source": "import sys\n\nprint(\"recursion limit:\", sys.getrecursionlimit())\n\ndef countdown_iter(n):\n    while n:\n        n -= 1               # same work, ZERO extra stack frames\n    return 0\n\nprint(\"iterative countdown(100_000) ->\", countdown_iter(100_000))\nprint(\"a loop keeps depth at 1 no matter how many iterations it runs\")"
+    },
+    {
+      "type": "md",
+      "source": "## 253 · Memoization (top-down)\n\nWrap the natural recursion with a cache keyed by arguments: repeat calls return the stored answer; only reachable subproblems ever get computed.\n\n*A student taping a MEMO to the fridge after every hard calculation: at the next midnight craving she reads the memo and skips the math. The fridge fills lazily, only with questions actually asked.*\n\n**Watch:** same function body, same answer — predict BOTH call counts. Why can the cached version never exceed 25 calls for fib(24)?"
+    },
+    {
+      "type": "code",
+      "source": "import functools\n\nnaive_calls = 0\ndef fib_naive(n):\n    global naive_calls\n    naive_calls += 1\n    return n if n < 2 else fib_naive(n - 1) + fib_naive(n - 2)\n\nmemo_calls = 0\n@functools.lru_cache(maxsize=None)\ndef fib_memo(n):\n    global memo_calls\n    memo_calls += 1          # runs only on a cache MISS\n    return n if n < 2 else fib_memo(n - 1) + fib_memo(n - 2)\n\nprint(\"fib_naive(24) =\", fib_naive(24), \"in\", naive_calls, \"calls\")\nprint(\"fib_memo(24)  =\", fib_memo(24), \"in\", memo_calls, \"calls\")\nprint(\"25 distinct subproblems (n = 0..24) -> at most 25 real calls\")"
+    },
+    {
+      "type": "md",
+      "source": "## 266 · Greedy coin-change failure\n\nGreedy \"largest coin first\" works for canonical systems (US coins) but fails in general: with coins {1, 3, 4}, greedy makes 6 as 4+1+1; optimal is 3+3.\n\n*A proud cashier in the Kingdom of 1-3-4 pennies slaps down the big 4 for a 6-cent sale, then fumbles two more coins — while the customer holds up two shiny 3s and smirks.*\n\n**Watch:** predict both coin lists before running. Where exactly does grabbing the 4 lock greedy out of the optimum?"
+    },
+    {
+      "type": "code",
+      "source": "coins, amount = [1, 3, 4], 6\n\ndef greedy(coins, amount):\n    picked = []\n    for c in sorted(coins, reverse=True):   # largest coin first\n        while amount >= c:\n            amount -= c\n            picked.append(c)\n    return picked\n\ndef dp_min_coins(coins, amount):\n    best = [0] + [None] * amount            # best[a] = fewest coins for a\n    take = [0] * (amount + 1)\n    for a in range(1, amount + 1):\n        for c in coins:\n            if c <= a and best[a - c] is not None:\n                if best[a] is None or best[a - c] + 1 < best[a]:\n                    best[a], take[a] = best[a - c] + 1, c\n    picked = []\n    while amount:\n        picked.append(take[amount])\n        amount -= take[amount]\n    return picked\n\ng, d = greedy(coins, amount), dp_min_coins(coins, amount)\nprint(\"greedy :\", \" + \".join(map(str, g)), \"->\", len(g), \"coins\")\nprint(\"dp     :\", \" + \".join(map(str, d)), \"->\", len(d), \"coins\")\nprint(\"largest-first is a trap outside canonical coin systems\")"
+    },
+    {
+      "type": "md",
+      "source": "## 270 · Breadth-first search\n\nExplore level by level with a queue; each node is first reached along a fewest-edges path, giving shortest paths in unweighted graphs.\n\n*A stone dropped in a pond: perfect rings ripple outward, soaking the distance-1 lilies, then the distance-2 — every lily is first touched by its shortest ripple.*\n\n**Watch:** predict the visit order (level by level from A) and the path to G before running. What different order would a stack give instead of a queue?"
+    },
+    {
+      "type": "code",
+      "source": "from collections import deque\n\ngraph = {\n    \"A\": [\"B\", \"C\"],\n    \"B\": [\"A\", \"D\", \"E\"],\n    \"C\": [\"A\", \"F\"],\n    \"D\": [\"B\"],\n    \"E\": [\"B\", \"F\"],\n    \"F\": [\"C\", \"E\", \"G\"],\n    \"G\": [\"F\"],\n}\n\nstart, target = \"A\", \"G\"\nq = deque([start])\nparent = {start: None}          # doubles as the visited set\norder = []\nwhile q:\n    node = q.popleft()          # queue -> ripple outward by level\n    order.append(node)\n    for nb in graph[node]:\n        if nb not in parent:\n            parent[nb] = node\n            q.append(nb)\n\npath, node = [], target\nwhile node is not None:\n    path.append(node)\n    node = parent[node]\npath.reverse()\n\nprint(\"visit order   :\", \" \".join(order))\nprint(\"shortest A->G :\", \" -> \".join(path), f\"({len(path) - 1} edges)\")\nprint(\"first arrival = fewest edges, guaranteed by the queue\")"
+    },
+    {
+      "type": "md",
+      "source": "## 283 · Fisher-Yates shuffle\n\nUniform in-place shuffle: walk i from the end, swapping a[i] with a[j] for random j ≤ i; every permutation equally likely, O(n).\n\n*Fisher nets one random fish from the shrinking barrel and freezes it against the barrel's back wall; the frozen row grows, the swimming pool shrinks — an honest shuffle, fish by fish.*\n\n**Watch:** the naive version draws j from the WHOLE list every step — 3³ = 27 outcomes cannot split evenly over 3! = 6 permutations. Predict which frequency table looks flat (~1000 each) and which does not."
+    },
+    {
+      "type": "code",
+      "source": "import random\nfrom collections import Counter\n\ndef naive_shuffle(a, rng):\n    for i in range(len(a)):\n        j = rng.randrange(len(a))        # BIASED: j from the whole list\n        a[i], a[j] = a[j], a[i]\n\ndef fisher_yates(a, rng):\n    for i in range(len(a) - 1, 0, -1):\n        j = rng.randrange(i + 1)         # correct: j only from [0, i]\n        a[i], a[j] = a[j], a[i]\n\ndef landing_counts(shuffle, trials=3000):\n    rng = random.Random(42)              # deterministic\n    where = Counter()\n    for _ in range(trials):\n        a = [\"A\", \"B\", \"C\"]\n        shuffle(a, rng)\n        where[a.index(\"A\")] += 1\n    return [where[p] for p in range(3)]\n\nprint(\"where 'A' lands over 3000 shuffles of [A, B, C]  (uniform ~ [1000, 1000, 1000])\")\nprint(\"  naive j in [0, n) :\", landing_counts(naive_shuffle))\nprint(\"  Fisher-Yates      :\", landing_counts(fisher_yates))"
+    },
+    {
+      "type": "md",
+      "source": "## 290 · Backtracking\n\nDFS over partial solutions: make a choice, recurse deeper, then UNDO the choice to try siblings; abandoning doomed branches early is the whole game.\n\n*Theseus in the labyrinth unspooling thread: at each fork he ties a knot (choose), ventures on (explore), and at a dead end rewinds to the knot and unties it (unchoose) to try the next corridor.*\n\n**Watch:** find the choose / explore / unchoose triple in the code. Predict how many 6-queens solutions exist — and what breaks if the `pop()` is deleted."
+    },
+    {
+      "type": "code",
+      "source": "def solve_n_queens(n):\n    solutions = []\n    cols, diag1, diag2 = set(), set(), set()\n    placement = []                      # placement[row] = chosen column\n\n    def place(row):\n        if row == n:\n            solutions.append(placement[:])\n            return\n        for col in range(n):\n            if col in cols or (row - col) in diag1 or (row + col) in diag2:\n                continue                # doomed branch: prune early\n            cols.add(col); diag1.add(row - col); diag2.add(row + col)\n            placement.append(col)       # choose\n            place(row + 1)              # explore\n            placement.pop()             # unchoose\n            cols.discard(col); diag1.discard(row - col); diag2.discard(row + col)\n\n    place(0)\n    return solutions\n\nsols = solve_n_queens(6)\nprint(\"6-queens solutions:\", len(sols))\nprint(\"first solution:\")\nfor col in sols[0]:\n    print(\"  \" + \"\".join(\"Q\" if c == col else \".\" for c in range(6)))"
+    }
+  ]
+}
