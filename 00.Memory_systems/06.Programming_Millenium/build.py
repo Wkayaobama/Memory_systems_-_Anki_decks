@@ -58,6 +58,12 @@ TUTO = [
     (5, "anki", "cards: front = {{Code}} (and a second template front = {{Concept}}), back = the rest"),
     (6, "anki", "file -> import each export_for_anki/*.csv (semicolon-separated, fields mapped in order) into a subdeck per hundred"),
     ("", "tip", 'concat like the original: front can be Code & " " & Concept'),
+    ("", "", ""),
+    ("3rd way", "excel", "multi-card import (see README 'Pathway 3'): save the matrix tab as tab-delimited .txt, re-saved as UTF-8"),
+    ("3rd way", "anki", "manage note types -> clone Basic (the '10 Question' type is not in the repo - recreating it IS these steps) -> fields = Code, Concept, Anchor, Definition, Example, Confusables IN COLUMN ORDER"),
+    ("3rd way", "anki", "cards: one template per question, front wrapped in a conditional so blanks make no card: {{#Definition}}Definition of {{Code}} {{Concept}}?{{/Definition}}"),
+    ("3rd way", "anki", "back: {{FrontSide}} <hr id=answer> {{Definition}} - repeat per column; reverse card {{#Concept}}Address of {{Concept}}?{{/Concept}} -> {{Code}}"),
+    ("3rd way", "anki", "file -> import the .txt (separator Tab, note type = the clone, fields map in order); each note yields one card per non-blank template"),
     ("more advanced", "youtube", "Converting a COMPLEX Excel file to an Anki deck! - YouTube"),
 ]
 

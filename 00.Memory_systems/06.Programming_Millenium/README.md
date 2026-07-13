@@ -107,6 +107,67 @@ committing notebooks *with* their outputs so review works without running anythi
 - `notebooks/` — the procedural layer: specs + builder + 10 executed notebooks
   (`pip install nbformat nbclient ipykernel` to rebuild)
 
+## Exporting to Anki — the three pathways
+
+Anki always comes last; the matrix stays the source of truth. Three routes, by increasing control:
+
+1. **Generated exports (simplest).** `python3 build.py` writes `export_for_anki/000.csv … 900.csv`
+   (semicolon-separated: `code;concept;anchor;definition;example;confusables`). In Anki:
+   *File → Import*, separator = semicolon, one subdeck per hundred-block.
+2. **The original tuto route** (see `01.Millenium`'s `tuto` tab): save the sheet as unicode
+   `.txt`, re-save it as UTF-8 in a text editor, import with fields mapped in column order.
+3. **Hand-built multi-card import** — the method from the video linked in the original tuto
+   tab (*"Converting a COMPLEX Excel file to an Anki deck!"*), formalized below. Use it when
+   you want ONE note per row to generate SEVERAL cards (a Definition card, an Anchor card, a
+   reverse Concept→Code card…), with blank fields producing no card.
+
+### Pathway 3, step by step
+
+**Prerequisite — the note type.** The video uses a "10 Question" note type, which is **not
+shipped in this repo**. Either download an equivalent shared multi-question note type from
+AnkiWeb, or recreate it yourself in two minutes: it is nothing more than a cloned note type
+with one field per column and one conditional card template per question (steps 4–6 do
+exactly this — recreating is usually faster than hunting the download).
+
+1. Open `Programming_Millenium.xlsx`, tab `matrix` (or your own working copy).
+   *Optional, from the original tuto:* for each kept column, filter blanks and type `N/A` so
+   no field arrives empty — with the conditional templates of step 6 this becomes optional,
+   since blank fields simply produce no card.
+2. *File → Save As* → **Text (tab-delimited) `.txt`**. If the encoding cannot be chosen,
+   open the `.txt` in a text editor and re-save it as **UTF-8** (the original tuto's notepad
+   step — accents in the anchors will break otherwise).
+3. Open Anki → *Tools → Manage Note Types*.
+4. *Add* → clone your multi-question type if you have one, otherwise **clone Basic** and
+   rename it (e.g. `Programming Millenium`).
+5. *Fields…* — add one field per exported column, **in the same order as the spreadsheet**:
+   `Code`, `Concept`, `Anchor`, `Definition`, `Example`, `Confusables`. Order is what Anki
+   maps against at import time.
+6. *Cards…* — one card template per question you want asked. Wrap every front in a
+   conditional block `{{#Field}} … {{/Field}}`: a note whose field is blank then generates
+   **no card** (this is the blank-card-elimination trick). For this matrix:
+
+   ```
+   Card "Definition"          Front:  {{#Definition}}Definition of {{Code}} {{Concept}}?{{/Definition}}
+                              Back:   {{FrontSide}} <hr id=answer> {{Definition}}
+
+   Card "Anchor"              Front:  {{#Anchor}}Anchor scene at {{Code}}?{{/Anchor}}
+                              Back:   {{FrontSide}} <hr id=answer> {{Anchor}} — {{Concept}}
+
+   Card "Reverse (concept→code)"  Front:  {{#Concept}}Address of {{Concept}}?{{/Concept}}
+                                  Back:   {{FrontSide}} <hr id=answer> {{Code}}
+   ```
+
+   Add more of the same shape for `Example` or `Confusables` if you drill those. The generic
+   pattern is the video's `{{#Category}} Category of {{Item}} {{/Category}}` — replace
+   `Category` with the column being asked and `Item` with the identifying field.
+7. *File → Import* — select the `.txt` from step 2; set **Note Type** to the one just built,
+   pick the target deck, separator = **Tab**, and check in the preview that each field maps
+   to the right column (same order = automatic).
+8. Import. Anki reports the notes added; each note yields as many cards as templates whose
+   wrapped field is non-blank.
+9. Review a handful of cards from each template, then drill — and as blocks stabilize, flip
+   `Learned` to 1 back in the matrix, where progress lives.
+
 Content was drafted by one authoring pass per domain, then de-duplicated ("one concept, one
 home") and cross-referenced. Expect to tweak entries as you learn — that's the point of the
 matrix: the spreadsheet is the living source, Anki is just the drill.
